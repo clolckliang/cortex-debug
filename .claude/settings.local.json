@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm install)",
+      "Bash(npm run vscode:prepublish)",
+      "Bash(npm run lint -- --fix)",
+      "Bash(webpack --mode production)",
+      "Bash(npx webpack --mode production)",
+      "Bash(node release.js --package)",
+      "Bash(git stash push -m \"Save waveform feature work\")",
+      "Bash(git stash pop)",
+      "Bash(git checkout -- src/frontend/extension.ts)",
+      "Bash(git checkout -- src/grapher/datasource.ts)",
+      "Bash(npx vsce ls --packaged --yarn --pre-release)",
+      "Bash(unzip -l cortex-debug-1.13.0-pre6.vsix)",
+      "Bash(npx webpack --mode development)",
+      "Bash(npm run lint)",
+      "Bash(npm run compile:*)",
+      "Bash(move:*)",
+      "Bash(npm run package:*)",
+      "Bash(powershell:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

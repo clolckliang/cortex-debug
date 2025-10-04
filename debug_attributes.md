@@ -81,8 +81,8 @@ If the type is marked as `{...}` it means that it is a complex item can have mul
 | showDevDebugTimestamps | boolean | Both | Show timestamps when 'showDevDebugOutput' is enabled |
 | stlinkPath | string | Both | Path to the ST-LINK_gdbserver executable. If not set then ST-LINK_gdbserver (ST-LINK_gdbserver.exe on Windows) must be on the system path. |
 | stm32cubeprogrammer | string | Both | This path is normally resolved to the installed STM32CubeIDE or STM32CubeProgrammer but can be overridden here. |
-| svdFile | string | Both | This is for 'XPERIPHERALS' window provided by 'mcu-debug.peripheral-viewer'. It can be a simple file name or more based on a CMSIS pack or deviceName. See 'mcu-debug.peripheral-viewer' for format |
-| svdPath | string | Both | This is for 'XPERIPHERALS' window provided by 'mcu-debug.peripheral-viewer' and 'Embedded Tools' Extension from Microsoft. It can be a simple file name. For 'mcu-debug.peripheral-viewer' or more based on a CMSIS pack or deviceName. See 'mcu-debug.peripheral-viewer' for format |
+| svdFile | string | Both | This is for 'XPERIPHERALS' window provided by 'cortex-debug.peripheral-viewer'. It can be a simple file name or more based on a CMSIS pack or deviceName. See 'cortex-debug.peripheral-viewer' for format |
+| svdPath | string | Both | This is for 'XPERIPHERALS' window provided by 'cortex-debug.peripheral-viewer' and 'Embedded Tools' Extension from Microsoft. It can be a simple file name. For 'cortex-debug.peripheral-viewer' or more based on a CMSIS pack or deviceName. See 'cortex-debug.peripheral-viewer' for format |
 | swoConfig | object | Both | Description of SWO can be configured. Also see our Wiki for details |
 | swoConfig<br>.cpuFrequency | number | Both | Target CPU frequency in Hz. |
 | swoConfig<br>.decoders | {object} | Both | SWO Decoder Configuration |

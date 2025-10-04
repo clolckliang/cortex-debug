@@ -26,6 +26,95 @@
                         "multipleOf": 1,
                         "minimum": 100,
                         "maximum": 5000
+                    },
+                    "cortex-debug.waveformTimeSpan": {
+                        "default": 60,
+                        "description": "Default time span for waveform display in seconds",
+                        "type": "number",
+                        "multipleOf": 1,
+                        "minimum": 10,
+                        "maximum": 300
+                    },
+                    "cortex-debug.waveformRefreshRate": {
+                        "default": 1.0,
+                        "description": "Waveform display refresh rate in Hz",
+                        "type": "number",
+                        "multipleOf": 0.1,
+                        "minimum": 0.1,
+                        "maximum": 20.0
+                    },
+                    "cortex-debug.waveformMaxDataPoints": {
+                        "default": 10000,
+                        "description": "Maximum number of data points to store per variable",
+                        "type": "number",
+                        "multipleOf": 1,
+                        "minimum": 1000,
+                        "maximum": 50000
+                    },
+                    "cortex-debug.waveformColorScheme": {
+                        "default": "professional",
+                        "description": "Color scheme for waveform variables",
+                        "type": "string",
+                        "enum": ["professional", "colorblind", "highContrast", "soft"]
+                    },
+                    "cortex-debug.waveformAutoStart": {
+                        "default": true,
+                        "description": "Automatically start waveform monitoring when debugging begins",
+                        "type": "boolean"
+                    },
+                    "cortex-debug.waveformYAxisMode": {
+                        "default": "auto",
+                        "description": "Y-axis scaling mode for waveform display",
+                        "type": "string",
+                        "enum": ["auto", "manual"]
+                    },
+                    "cortex-debug.waveformYMin": {
+                        "default": -1.0,
+                        "description": "Manual Y-axis minimum value (when Y-axis mode is manual)",
+                        "type": "number"
+                    },
+                    "cortex-debug.waveformYMax": {
+                        "default": 1.0,
+                        "description": "Manual Y-axis maximum value (when Y-axis mode is manual)",
+                        "type": "number"
+                    },
+                    "cortex-debug.waveformShowGrid": {
+                        "default": true,
+                        "description": "Show grid lines on waveform display",
+                        "type": "boolean"
+                    },
+                    "cortex-debug.waveformShowLegend": {
+                        "default": true,
+                        "description": "Show legend on waveform display",
+                        "type": "boolean"
+                    },
+                    "cortex-debug.waveformDefaultLineWidth": {
+                        "default": 2,
+                        "description": "Default line width for waveform variables",
+                        "type": "number",
+                        "multipleOf": 1,
+                        "minimum": 1,
+                        "maximum": 10
+                    },
+                    "cortex-debug.waveformFFTWindowSize": {
+                        "default": 512,
+                        "description": "Default FFT window size for frequency analysis",
+                        "type": "number",
+                        "multipleOf": 256,
+                        "minimum": 256,
+                        "maximum": 4096
+                    },
+                    "cortex-debug.waveformFFTWindowFunction": {
+                        "default": "hanning",
+                        "description": "Default FFT window function for frequency analysis",
+                        "type": "string",
+                        "enum": ["hanning", "hamming", "blackman", "rectangular"]
+                    },
+                    "cortex-debug.waveformDataExportFormat": {
+                        "default": "json",
+                        "description": "Default format for waveform data export",
+                        "type": "string",
+                        "enum": ["json", "csv"]
                     }
                 }
             },
@@ -475,6 +564,113 @@
                 "command": "cortex-debug.liveWatch.addExpr",
                 "title": "Add expression to Live Watch window",
                 "icon": "$(plus)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.show",
+                "title": "Show Waveform",
+                "icon": "$(graph)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.liveWatch.addToWaveform",
+                "title": "Add to Waveform",
+                "icon": "$(graph)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.addVariable",
+                "title": "Add Variable to Waveform"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.removeVariable",
+                "title": "Remove Variable from Waveform"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.clearAll",
+                "title": "Clear All Waveform Data"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.toggleVariable",
+                "title": "Toggle Waveform Variable"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.setStyle",
+                "title": "Set Waveform Variable Style"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.setStyleFromNode",
+                "title": "Set Waveform Style"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.exportData",
+                "title": "Export Waveform Data"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.importConfig",
+                "title": "Import Waveform Configuration"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.exportConfig",
+                "title": "Export Waveform Configuration"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.fftAnalysis",
+                "title": "Perform FFT Analysis"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.fftAnalysisFromNode",
+                "title": "Perform FFT Analysis"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.updateSettings",
+                "title": "Update Waveform Settings"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.addToGraph",
+                "title": "Add Variable to Graph"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.createGraph",
+                "title": "Create New Graph"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.graphSettings",
+                "title": "Graph Settings"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.changeVariableColor",
+                "title": "Change Variable Color"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.toggleFFT",
+                "title": "Toggle FFT Analysis"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.exportGraphConfig",
+                "title": "Export Graph Configuration"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.importGraphConfig",
+                "title": "Import Graph Configuration"
             }
         ],
         "keybindings": [
@@ -1082,12 +1278,12 @@
                             },
                             "svdFile": {
                                 "default": null,
-                                "description": "This is for 'XPERIPHERALS' window provided by 'mcu-debug.peripheral-viewer'. It can be a simple file name or more based on a CMSIS pack or deviceName. See 'mcu-debug.peripheral-viewer' for format",
+                                "description": "This is for 'XPERIPHERALS' window provided by 'cortex-debug.peripheral-viewer'. It can be a simple file name or more based on a CMSIS pack or deviceName. See 'cortex-debug.peripheral-viewer' for format",
                                 "type": "string"
                             },
                             "svdPath": {
                                 "default": null,
-                                "description": "This is for 'XPERIPHERALS' window provided by 'mcu-debug.peripheral-viewer' and 'Embedded Tools' Extension from Microsoft. It can be a simple file name. For 'mcu-debug.peripheral-viewer' or more based on a CMSIS pack or deviceName. See 'mcu-debug.peripheral-viewer' for format",
+                                "description": "This is for 'XPERIPHERALS' window provided by 'cortex-debug.peripheral-viewer' and 'Embedded Tools' Extension from Microsoft. It can be a simple file name. For 'cortex-debug.peripheral-viewer' or more based on a CMSIS pack or deviceName. See 'cortex-debug.peripheral-viewer' for format",
                                 "type": "string"
                             },
                             "rttConfig": {
@@ -2265,12 +2461,12 @@
                             },
                             "svdFile": {
                                 "default": null,
-                                "description": "This is for 'XPERIPHERALS' window provided by 'mcu-debug.peripheral-viewer'. It can be a simple file name or more based on a CMSIS pack or deviceName. See 'mcu-debug.peripheral-viewer' for format",
+                                "description": "This is for 'XPERIPHERALS' window provided by 'cortex-debug.peripheral-viewer'. It can be a simple file name or more based on a CMSIS pack or deviceName. See 'cortex-debug.peripheral-viewer' for format",
                                 "type": "string"
                             },
                             "svdPath": {
                                 "default": null,
-                                "description": "This is for 'XPERIPHERALS' window provided by 'mcu-debug.peripheral-viewer' and 'Embedded Tools' Extension from Microsoft. It can be a simple file name. For 'mcu-debug.peripheral-viewer' or more based on a CMSIS pack or deviceName. See 'mcu-debug.peripheral-viewer' for format",
+                                "description": "This is for 'XPERIPHERALS' window provided by 'cortex-debug.peripheral-viewer' and 'Embedded Tools' Extension from Microsoft. It can be a simple file name. For 'cortex-debug.peripheral-viewer' or more based on a CMSIS pack or deviceName. See 'cortex-debug.peripheral-viewer' for format",
                                 "type": "string"
                             },
                             "rttConfig": {
@@ -2951,6 +3147,10 @@
                 {
                     "command": "cortex-debug.liveWatch.addExpr",
                     "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.show",
+                    "when": "debugType === cortex-debug"
                 }
             ],
             "debug/toolBar": [
@@ -2980,6 +3180,21 @@
                     "command": "cortex-debug.liveWatch.removeExpr",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
                     "group": "inline"
+                },
+                {
+                    "command": "cortex-debug.liveWatch.addToWaveform",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "inline"
+                },
+                {
+                    "command": "cortex-debug.waveform.setStyleFromNode",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveform"
+                },
+                {
+                    "command": "cortex-debug.waveform.fftAnalysisFromNode",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveform"
                 }
             ],
             "view/title": [
@@ -3017,6 +3232,11 @@
                     "command": "cortex-debug.varHexModeTurnOff",
                     "when": "view == cortex-debug.liveWatch && inDebugMode && debugType == 'cortex-debug' && debugState == stopped && !cortex-debug:variableUseNaturalFormat",
                     "group": "navigation"
+                },
+                {
+                    "command": "cortex-debug.waveform.show",
+                    "when": "view == cortex-debug.waveform",
+                    "group": "navigation"
                 }
             ],
             "debug/variables/context": [
@@ -3032,6 +3252,15 @@
                 {
                     "id": "cortex-debug.liveWatch",
                     "name": "Cortex Live Watch",
+                    "when": "debugType == cortex-debug"
+                }
+            ]
+        },
+        "viewsWebview": {
+            "debug": [
+                {
+                    "id": "cortex-debug.waveform",
+                    "name": "Waveform",
                     "when": "debugType == cortex-debug"
                 }
             ]
@@ -3090,10 +3319,10 @@
         "embedded"
     ],
     "extensionDependencies": [
-        "mcu-debug.debug-tracker-vscode",
-        "mcu-debug.memory-view",
-        "mcu-debug.rtos-views",
-        "mcu-debug.peripheral-viewer"
+        "cortex-debug.debug-tracker-vscode",
+        "cortex-debug.memory-view",
+        "cortex-debug.rtos-views",
+        "cortex-debug.peripheral-viewer"
     ],
     "main": "./dist/extension.js",
     "name": "cortex-debug",

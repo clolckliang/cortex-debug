@@ -4,6 +4,8 @@ import * as path from 'path';
 
 import { CortexDebugChannel } from '../dbgmsgs';
 import { LiveWatchTreeProvider, LiveVariableNode } from './views/live-watch';
+import { WaveformDataProvider } from './views/waveform-data-provider';
+import { WaveformWebviewPanel } from './views/waveform-webview';
 
 import { RTTCore, SWOCore } from './swo/core';
 import {
@@ -45,6 +47,8 @@ export class CortexDebugExtension {
     private memoryProvider: MemoryContentProvider;
     private liveWatchProvider: LiveWatchTreeProvider;
     private liveWatchTreeView: vscode.TreeView<LiveVariableNode>;
+    private waveformDataProvider: WaveformDataProvider;
+    private waveformWebview: WaveformWebviewPanel;
 
     private SVDDirectory: SVDInfo[] = [];
     private functionSymbols: SymbolInformation[] = null;
@@ -59,8 +63,15 @@ export class CortexDebugExtension {
 
         this.liveWatchProvider = new LiveWatchTreeProvider(this.context);
         this.liveWatchTreeView = vscode.window.createTreeView('cortex-debug.liveWatch', {
-            treeDataProvider: this.liveWatchProvider
+            treeDataProvider: this.liveWatchProvider,
+            showCollapseAll: true
         });
+
+        // Setup Live Watch tree view context menus
+        vscode.window.registerTreeDataProvider('cortex-debug.liveWatch', this.liveWatchProvider);
+
+        this.waveformDataProvider = new WaveformDataProvider(this.liveWatchProvider);
+        this.waveformWebview = new WaveformWebviewPanel(this.context, this.liveWatchProvider, this.waveformDataProvider);
 
         vscode.commands.executeCommand('setContext', `cortex-debug:${CortexDebugKeys.VARIABLE_DISPLAY_MODE}`,
             config.get(CortexDebugKeys.VARIABLE_DISPLAY_MODE, true));
@@ -84,6 +95,24 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToLiveWatch', this.addToLiveWatch.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveUp', this.moveUpLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveDown', this.moveDownLiveWatchExpr.bind(this)),
+
+            vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
+
+            vscode.commands.registerCommand('cortex-debug.waveform.show', this.showWaveform.bind(this)),
+
+            // Waveform-related commands
+            vscode.commands.registerCommand('cortex-debug.waveform.addVariable', this.addWaveformVariable.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.removeVariable', this.removeWaveformVariable.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.clearAll', this.clearWaveformData.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.toggleVariable', this.toggleWaveformVariable.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.setStyle', this.setWaveformVariableStyle.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.setStyleFromNode', this.setWaveformVariableStyleFromNode.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.exportData', this.exportWaveformData.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.importConfig', this.importWaveformConfig.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.exportConfig', this.exportWaveformConfig.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.fftAnalysis', this.performWaveformFFT.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.fftAnalysisFromNode', this.performWaveformFFTFromNode.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.updateSettings', this.updateWaveformSettings.bind(this)),
 
             vscode.workspace.onDidChangeConfiguration(this.settingsChanged.bind(this)),
             vscode.debug.onDidReceiveDebugSessionCustomEvent(this.receivedCustomEvent.bind(this)),
@@ -232,7 +261,7 @@ export class CortexDebugExtension {
     }
 
     private examineMemory() {
-        const cmd = 'mcu-debug.memory-view.addMemoryView';
+        const cmd = 'cortex-debug.memory-view.addMemoryView';
         vscode.commands.executeCommand(cmd).then(() => { }, (e) => {
             const installExt = 'Install MemoryView Extension';
             vscode.window.showErrorMessage(
@@ -246,7 +275,7 @@ export class CortexDebugExtension {
                 }
             ).then((v) => {
                 if (v && (v.title === installExt)) {
-                    vscode.commands.executeCommand('workbench.extensions.installExtension', 'mcu-debug.memory-view');
+                    vscode.commands.executeCommand('workbench.extensions.installExtension', 'cortex-debug.memory-view');
                 }
             });
         });
@@ -911,6 +940,524 @@ export class CortexDebugExtension {
 
     private moveDownLiveWatchExpr(node: any) {
         this.liveWatchProvider.moveDownNode(node);
+    }
+
+    private showWaveform(): void {
+        this.waveformWebview.show();
+    }
+
+    private addToWaveform(node: any) {
+        if (node && node.getExpr) {
+            const success = this.waveformDataProvider.addVariable(node);
+            if (success) {
+                vscode.window.showInformationMessage(`Added '${node.getName()}' to waveform monitoring`);
+                // Auto-show waveform view when first variable is added
+                this.waveformWebview.show();
+            }
+        }
+    }
+
+    private async addWaveformVariable(): Promise<void> {
+        const expression = await vscode.window.showInputBox({
+            prompt: 'Enter variable expression to monitor',
+            placeHolder: 'e.g., myVariable, array[0], struct.member'
+        });
+
+        if (expression) {
+            // Create a temporary variable node from the expression
+            const variableNode = {
+                getExpr: () => expression,
+                getName: () => expression
+            };
+
+            const success = this.waveformDataProvider.addVariable(variableNode as any);
+            if (success) {
+                vscode.window.showInformationMessage(`Added '${expression}' to waveform monitoring`);
+            } else {
+                vscode.window.showWarningMessage(`Variable '${expression}' is already being monitored`);
+            }
+        }
+    }
+
+    private async removeWaveformVariable(): Promise<void> {
+        const variables = this.waveformDataProvider.getVariables();
+        if (variables.length === 0) {
+            vscode.window.showInformationMessage('No variables are currently being monitored');
+            return;
+        }
+
+        const items = variables.map((v) => ({
+            label: v.name,
+            description: v.expression || v.id,
+            id: v.id
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select variable to remove from waveform monitoring'
+        });
+
+        if (selected) {
+            this.waveformDataProvider.removeVariable(selected.id);
+            vscode.window.showInformationMessage(`Removed '${selected.label}' from waveform monitoring`);
+        }
+    }
+
+    private async clearWaveformData(): Promise<void> {
+        const result = await vscode.window.showWarningMessage(
+            'This will clear all waveform data. Are you sure?',
+            'Clear', 'Cancel'
+        );
+
+        if (result === 'Clear') {
+            this.waveformDataProvider.clearAllData();
+            vscode.window.showInformationMessage('All waveform data has been cleared');
+        }
+    }
+
+    private async toggleWaveformVariable(): Promise<void> {
+        const variables = this.waveformDataProvider.getVariables();
+        if (variables.length === 0) {
+            vscode.window.showInformationMessage('No variables are currently being monitored');
+            return;
+        }
+
+        const items = variables.map((v) => ({
+            label: v.name,
+            description: `${v.enabled ? 'Enabled' : 'Disabled'} - ${v.expression || v.id}`,
+            id: v.id,
+            enabled: v.enabled
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select variable to toggle enable/disable'
+        });
+
+        if (selected) {
+            this.waveformDataProvider.updateVariableSettings(selected.id, { enabled: !selected.enabled });
+            vscode.window.showInformationMessage(
+                `${selected.label} is now ${!selected.enabled ? 'enabled' : 'disabled'}`
+            );
+        }
+    }
+
+    private async setWaveformVariableStyle(): Promise<void> {
+        const variables = this.waveformDataProvider.getVariables();
+        if (variables.length === 0) {
+            vscode.window.showInformationMessage('No variables are currently being monitored');
+            return;
+        }
+
+        const selectedVar = await vscode.window.showQuickPick(
+            variables.map((v) => ({ label: v.name, description: v.expression || v.id, id: v.id })),
+            { placeHolder: 'Select variable to configure style' }
+        );
+
+        if (!selectedVar) return;
+
+        const styleOptions = [
+            { label: 'Line Style', description: 'Change line drawing style' },
+            { label: 'Line Width', description: 'Change line thickness' },
+            { label: 'Color', description: 'Change variable color' },
+            { label: 'Opacity', description: 'Change line opacity' }
+        ];
+
+        const selectedOption = await vscode.window.showQuickPick(styleOptions, {
+            placeHolder: 'Select style property to change'
+        });
+
+        if (!selectedOption) return;
+
+        switch (selectedOption.label) {
+            case 'Line Style': {
+                const lineStyles = ['solid', 'dashed', 'dotted'];
+                const selectedStyle = await vscode.window.showQuickPick(lineStyles, {
+                    placeHolder: 'Select line style'
+                });
+                if (selectedStyle) {
+                    this.waveformDataProvider.setVariableStyle(selectedVar.id, {
+                        lineStyle: selectedStyle as any
+                    });
+                }
+                break;
+            }
+
+            case 'Line Width': {
+                const defaultWidth = this.waveformDataProvider.getDefaultLineWidth().toString();
+                const width = await vscode.window.showInputBox({
+                    prompt: 'Enter line width (1-10)',
+                    placeHolder: defaultWidth,
+                    value: defaultWidth,
+                    validateInput: (value) => {
+                        const num = parseFloat(value);
+                        return (isNaN(num) || num < 1 || num > 10) ? 'Please enter a number between 1 and 10' : null;
+                    }
+                });
+                if (width) {
+                    this.waveformDataProvider.setVariableStyle(selectedVar.id, {
+                        lineWidth: parseFloat(width)
+                    });
+                }
+                break;
+            }
+
+            case 'Color': {
+                const color = await vscode.window.showInputBox({
+                    prompt: 'Enter color (hex code or color name)',
+                    placeHolder: '#ff0000'
+                });
+                if (color) {
+                    this.waveformDataProvider.setVariableStyle(selectedVar.id, { color });
+                }
+                break;
+            }
+
+            case 'Opacity': {
+                const opacity = await vscode.window.showInputBox({
+                    prompt: 'Enter opacity (0.0-1.0)',
+                    placeHolder: '1.0',
+                    validateInput: (value) => {
+                        const num = parseFloat(value);
+                        return (isNaN(num) || num < 0 || num > 1) ? 'Please enter a number between 0 and 1' : null;
+                    }
+                });
+                if (opacity) {
+                    this.waveformDataProvider.setVariableStyle(selectedVar.id, {
+                        opacity: parseFloat(opacity)
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    private async exportWaveformData(): Promise<void> {
+        const variables = this.waveformDataProvider.getVariables();
+        if (variables.length === 0) {
+            vscode.window.showInformationMessage('No data to export');
+            return;
+        }
+
+        const defaultFormat = this.waveformDataProvider.getDefaultDataExportFormat();
+        const formatOptions = ['json', 'csv'];
+        const format = await vscode.window.showQuickPick(formatOptions, {
+            placeHolder: 'Select export format'
+        });
+
+        if (!format) return;
+
+        const data = this.waveformDataProvider.exportData(format as any);
+
+        const uri = await vscode.window.showSaveDialog({
+            filters: format === 'json' ? { 'JSON Files': ['json'] } : { 'CSV Files': ['csv'] },
+            defaultUri: vscode.Uri.file(`waveform_data.${format}`)
+        });
+
+        if (uri) {
+            fs.writeFileSync(uri.fsPath, data);
+            vscode.window.showInformationMessage(`Waveform data exported to ${uri.fsPath}`);
+        }
+    }
+
+    private async importWaveformConfig(): Promise<void> {
+        const uri = await vscode.window.showOpenDialog({
+            filters: { 'JSON Files': ['json'] },
+            canSelectMany: false
+        });
+
+        if (uri && uri.length > 0) {
+            try {
+                const configJson = fs.readFileSync(uri[0].fsPath, 'utf8');
+                const success = this.waveformDataProvider.importConfiguration(configJson);
+
+                if (success) {
+                    vscode.window.showInformationMessage(`Configuration imported successfully`);
+                } else {
+                    vscode.window.showErrorMessage('Failed to import configuration. Check the file format.');
+                }
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to read configuration file: ${error}`);
+            }
+        }
+    }
+
+    private async exportWaveformConfig(): Promise<void> {
+        const config = this.waveformDataProvider.exportConfiguration();
+
+        const uri = await vscode.window.showSaveDialog({
+            filters: { 'JSON Files': ['json'] },
+            defaultUri: vscode.Uri.file('waveform_config.json')
+        });
+
+        if (uri) {
+            fs.writeFileSync(uri.fsPath, config);
+            vscode.window.showInformationMessage(`Configuration exported to ${uri.fsPath}`);
+        }
+    }
+
+    private async performWaveformFFT(): Promise<void> {
+        const variables = this.waveformDataProvider.getVariables();
+        if (variables.length === 0) {
+            vscode.window.showInformationMessage('No variables available for FFT analysis');
+            return;
+        }
+
+        const selectedVar = await vscode.window.showQuickPick(
+            variables.map((v) => ({ label: v.name, description: v.expression || v.id, id: v.id })),
+            { placeHolder: 'Select variable for FFT analysis' }
+        );
+
+        if (!selectedVar) return;
+
+        const defaultWindowSize = this.waveformDataProvider.getDefaultFFTWindowSize().toString();
+        const windowSizeOptions = ['256', '512', '1024', '2048', '4096'];
+        const windowSize = await vscode.window.showQuickPick(windowSizeOptions, {
+            placeHolder: 'Select FFT window size'
+        });
+
+        if (!windowSize) return;
+
+        const defaultWindowFunction = this.waveformDataProvider.getDefaultFFTWindowFunction();
+        const windowFunctionOptions = ['hanning', 'hamming', 'blackman', 'rectangular'];
+        const windowFunction = await vscode.window.showQuickPick(windowFunctionOptions, {
+            placeHolder: 'Select window function'
+        });
+
+        if (!windowFunction) return;
+
+        const fftResult = this.waveformDataProvider.getFFTAnalysis(
+            selectedVar.id,
+            parseInt(windowSize),
+            windowFunction
+        );
+
+        if (fftResult) {
+            const dominantPhase = (fftResult.dominantFrequency.phase * 180 / Math.PI).toFixed(1);
+            const message = `
+FFT Analysis Results for ${selectedVar.label}:
+- Window Size: ${windowSize} samples
+- Window Function: ${windowFunction}
+- Sampling Rate: ${fftResult.samplingRate} Hz
+- Dominant Frequency: ${fftResult.dominantFrequency.frequency.toFixed(2)} Hz
+- Dominant Magnitude: ${fftResult.dominantFrequency.magnitude.toFixed(2)} dB
+- Dominant Phase: ${dominantPhase}°
+- Noise Floor: ${fftResult.noiseFloor.toFixed(2)} dB
+- Total Harmonic Distortion: ${(fftResult.thd * 100).toFixed(3)}%
+- Peak Count: ${fftResult.peaks.length}
+
+Top 3 Peaks:
+${fftResult.peaks.slice(0, 3).map((peak, i) =>
+    `${i + 1}. ${peak.frequency.toFixed(2)} Hz, ${peak.magnitude.toFixed(2)} dB, SNR: ${peak.snr.toFixed(1)} dB`
+).join('\n')}
+            `.trim();
+
+            vscode.window.showInformationMessage(message, 'Copy to Clipboard').then((action) => {
+                if (action === 'Copy to Clipboard') {
+                    vscode.env.clipboard.writeText(message);
+                }
+            });
+        } else {
+            vscode.window.showErrorMessage('Insufficient data for FFT analysis. Need at least ' + windowSize + ' data points.');
+        }
+    }
+
+    private async updateWaveformSettings(): Promise<void> {
+        const settings = this.waveformDataProvider.getSettings();
+
+        const timeSpan = await vscode.window.showInputBox({
+            prompt: 'Time span in seconds',
+            value: settings.timeSpan.toString(),
+            validateInput: (value) => {
+                const num = parseFloat(value);
+                return (isNaN(num) || num <= 0) ? 'Please enter a positive number' : null;
+            }
+        });
+
+        if (!timeSpan) return;
+
+        const refreshRate = await vscode.window.showInputBox({
+            prompt: 'Refresh rate in Hz',
+            value: settings.refreshRate.toString(),
+            validateInput: (value) => {
+                const num = parseFloat(value);
+                return (isNaN(num) || num <= 0) ? 'Please enter a positive number' : null;
+            }
+        });
+
+        if (!refreshRate) return;
+
+        const maxDataPoints = await vscode.window.showInputBox({
+            prompt: 'Maximum data points per variable',
+            value: settings.maxDataPoints.toString(),
+            validateInput: (value) => {
+                const num = parseInt(value);
+                return (isNaN(num) || num <= 0) ? 'Please enter a positive integer' : null;
+            }
+        });
+
+        if (!maxDataPoints) return;
+
+        this.waveformDataProvider.updateSettings({
+            timeSpan: parseFloat(timeSpan),
+            refreshRate: parseFloat(refreshRate),
+            maxDataPoints: parseInt(maxDataPoints)
+        });
+
+        vscode.window.showInformationMessage('Waveform settings updated successfully');
+    }
+
+    private async setWaveformVariableStyleFromNode(node: any): Promise<void> {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const expression = node.getExpr();
+        const variable = this.waveformDataProvider.getVariable(expression);
+
+        if (!variable) {
+            vscode.window.showInformationMessage(`Variable '${node.getName()}' is not currently in waveform monitoring. Please add it first.`);
+            return;
+        }
+
+        // Open the waveform view and style configuration
+        this.waveformWebview.show();
+
+        // Apply style configuration for this specific variable
+        await this.setWaveformVariableStyleForVariable(expression, variable);
+    }
+
+    private async setWaveformVariableStyleForVariable(variableId: string, variable: any): Promise<void> {
+        const styleOptions = [
+            { label: 'Line Style', description: 'Change line drawing style' },
+            { label: 'Line Width', description: 'Change line thickness' },
+            { label: 'Color', description: 'Change variable color' },
+            { label: 'Opacity', description: 'Change line opacity' }
+        ];
+
+        const selectedOption = await vscode.window.showQuickPick(styleOptions, {
+            placeHolder: 'Select style property to change'
+        });
+
+        if (!selectedOption) return;
+
+        switch (selectedOption.label) {
+            case 'Line Style': {
+                const lineStyles = ['solid', 'dashed', 'dotted'];
+                const selectedStyle = await vscode.window.showQuickPick(lineStyles, {
+                    placeHolder: 'Select line style'
+                });
+                if (selectedStyle) {
+                    this.waveformDataProvider.setVariableStyle(variableId, {
+                        lineStyle: selectedStyle as any
+                    });
+                }
+                break;
+            }
+
+            case 'Line Width': {
+                const defaultWidth = this.waveformDataProvider.getDefaultLineWidth().toString();
+                const width = await vscode.window.showInputBox({
+                    prompt: 'Enter line width (1-10)',
+                    placeHolder: defaultWidth,
+                    value: defaultWidth,
+                    validateInput: (value) => {
+                        const num = parseFloat(value);
+                        return (isNaN(num) || num < 1 || num > 10) ? 'Please enter a number between 1 and 10' : null;
+                    }
+                });
+                if (width) {
+                    this.waveformDataProvider.setVariableStyle(variableId, {
+                        lineWidth: parseFloat(width)
+                    });
+                }
+                break;
+            }
+
+            case 'Color': {
+                const color = await vscode.window.showInputBox({
+                    prompt: 'Enter color (hex code or color name)',
+                    placeHolder: '#ff0000'
+                });
+                if (color) {
+                    this.waveformDataProvider.setVariableStyle(variableId, { color });
+                }
+                break;
+            }
+
+            case 'Opacity': {
+                const opacity = await vscode.window.showInputBox({
+                    prompt: 'Enter opacity (0.0-1.0)',
+                    placeHolder: '1.0',
+                    validateInput: (value) => {
+                        const num = parseFloat(value);
+                        return (isNaN(num) || num < 0 || num > 1) ? 'Please enter a number between 0 and 1' : null;
+                    }
+                });
+                if (opacity) {
+                    this.waveformDataProvider.setVariableStyle(variableId, {
+                        opacity: parseFloat(opacity)
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    private performWaveformFFTFromNode(node: any): void {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const expression = node.getExpr();
+        const variable = this.waveformDataProvider.getVariable(expression);
+
+        if (!variable) {
+            vscode.window.showInformationMessage(`Variable '${node.getName()}' is not currently in waveform monitoring. Please add it first.`);
+            return;
+        }
+
+        // Open waveform view and perform FFT
+        this.waveformWebview.show();
+
+        // Use default FFT settings
+        const defaultWindowSize = this.waveformDataProvider.getDefaultFFTWindowSize();
+        const defaultWindowFunction = this.waveformDataProvider.getDefaultFFTWindowFunction();
+
+        const fftResult = this.waveformDataProvider.getFFTAnalysis(
+            expression,
+            defaultWindowSize,
+            defaultWindowFunction
+        );
+
+        if (fftResult) {
+            const dominantPhase = (fftResult.dominantFrequency.phase * 180 / Math.PI).toFixed(1);
+            const message = `
+FFT Analysis Results for ${node.getName()}:
+- Window Size: ${defaultWindowSize} samples
+- Window Function: ${defaultWindowFunction}
+- Sampling Rate: ${fftResult.samplingRate} Hz
+- Dominant Frequency: ${fftResult.dominantFrequency.frequency.toFixed(2)} Hz
+- Dominant Magnitude: ${fftResult.dominantFrequency.magnitude.toFixed(2)} dB
+- Dominant Phase: ${dominantPhase}°
+- Noise Floor: ${fftResult.noiseFloor.toFixed(2)} dB
+- Total Harmonic Distortion: ${(fftResult.thd * 100).toFixed(3)}%
+- Peak Count: ${fftResult.peaks.length}
+
+Top 3 Peaks:
+${fftResult.peaks.slice(0, 3).map((peak, i) =>
+    `${i + 1}. ${peak.frequency.toFixed(2)} Hz, ${peak.magnitude.toFixed(2)} dB, SNR: ${peak.snr.toFixed(1)} dB`
+).join('\n')}
+            `.trim();
+
+            vscode.window.showInformationMessage(message, 'Copy to Clipboard').then((action) => {
+                if (action === 'Copy to Clipboard') {
+                    vscode.env.clipboard.writeText(message);
+                }
+            });
+        } else {
+            vscode.window.showErrorMessage(`Insufficient data for FFT analysis. Need at least ${defaultWindowSize} data points.`);
+        }
     }
 }
 
