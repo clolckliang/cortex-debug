@@ -1,6 +1,81 @@
 # ChangeLog
 
 # V1.13.0-pre6
+* **🎉 Major Feature: Real-Time Variable Waveform Monitoring**
+  * Complete real-time waveform visualization system for embedded development
+  * Professional canvas-based rendering with multi-variable support
+  * Live data collection with configurable refresh rates (0.1-20 Hz)
+  * Intelligent data management with circular buffers and automatic cleanup
+  * Seamless integration with existing Live Watch panel
+
+* **🎨 Advanced Visualization Features**
+  * Interactive variable sidebar with real-time value display
+  * Configurable chart settings (time span, refresh rate, data limits)
+  * Multiple line styles (solid, dashed, dotted) with customizable properties
+  * Advanced color system with 4 professional color schemes
+  * Full VSCode theme integration and responsive design
+
+* **📊 FFT Frequency Analysis Tools**
+  * Complete FFT implementation with Cooley-Tukey algorithm
+  * Multiple window functions: Hanning, Hamming, Blackman, Rectangular
+  * Configurable window sizes: 256, 512, 1024, 2048, 4096 samples
+  * Automatic peak detection with parabolic interpolation
+  * Signal metrics: THD, noise floor, SNR analysis, phase information
+
+* **⚙️ Comprehensive Configuration System**
+  * 12 new VSCode settings for waveform customization
+  * JSON-based configuration import/export functionality
+  * Intelligent defaults and real-time setting updates
+  * Memory usage optimization with configurable data limits
+
+* **🖱️ Enhanced User Interface**
+  * 13 new VSCode commands accessible via Command Palette
+  * Context menu integration in Live Watch panel
+  * Interactive legend with show/hide variable functionality
+  * Data export capabilities in JSON and CSV formats
+
+* **🔧 Technical Improvements**
+  * Hardware-accelerated Canvas 2D rendering
+  * Efficient circular buffer implementation
+  * Automatic session management (start/stop with debug sessions)
+  * Performance optimization for sub-second refresh rates
+
+* **📝 New Configuration Options**
+  * `cortex-debug.waveformTimeSpan` - Chart time window (1-300s)
+  * `cortex-debug.waveformRefreshRate` - Data refresh frequency (0.1-20 Hz)
+  * `cortex-debug.waveformMaxDataPoints` - Data point limit per variable
+  * `cortex-debug.waveformColorScheme` - Color scheme selection
+  * `cortex-debug.waveformAutoStart` - Automatic monitoring on debug start
+  * `cortex-debug.waveformYAxisMode` - Y-axis scaling (auto/manual)
+  * `cortex-debug.waveformShowGrid/Legend` - Display options
+  * `cortex-debug.waveformDefaultLineWidth` - Default line width
+  * `cortex-debug.waveformFFTWindowSize/Function` - FFT defaults
+  * `cortex-debug.waveformDataExportFormat` - Export format preference
+
+* **🚀 New VSCode Commands**
+  * `cortex-debug.waveform.show` - Open waveform monitor
+  * `cortex-debug.waveform.addVariable` - Add variable to monitoring
+  * `cortex-debug.waveform.removeVariable` - Remove variable
+  * `cortex-debug.waveform.clearAll` - Clear all data
+  * `cortex-debug.waveform.toggleVariable` - Enable/disable variable
+  * `cortex-debug.waveform.setStyle` - Configure appearance
+  * `cortex-debug.waveform.exportData` - Export data
+  * `cortex-debug.waveform.importConfig` - Import configuration
+  * `cortex-debug.waveform.exportConfig` - Export configuration
+  * `cortex-debug.waveform.fftAnalysis` - Perform FFT analysis
+  * `cortex-debug.waveform.updateSettings` - Update settings
+
+* **🖱️ Live Watch Context Menu Integration**
+  * "Add to Waveform" - Right-click to add variables
+  * "Set Waveform Style" - Configure variable appearance
+  * "Perform FFT Analysis" - Analyze frequency spectrum
+
+* **📦 Performance and Compatibility**
+  * Memory usage optimization with configurable limits
+  * Intelligent data cleanup to prevent memory leaks
+  * Full compatibility with existing Cortex-Debug features
+  * Maintains all pre-existing functionality while adding waveform capabilities
+
 * Make the advanced decoder work properly for RTT. It now allows a dispose.
 * Both SWO/RTT OUTPUT panels are now recycled instead of creating a new one every time. You can for a new one by supplying a new outputLabel and/or typeName.
 
