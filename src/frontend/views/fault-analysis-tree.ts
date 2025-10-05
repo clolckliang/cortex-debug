@@ -322,7 +322,7 @@ export class FaultAnalysisTreeProvider implements TreeDataProvider<FaultAnalysis
             );
             root.addChild(recommendationsNode);
 
-            const recommendations = analysis.recommendation.split('\n').filter(r => r.trim());
+            const recommendations = analysis.recommendation.split('\n').filter((r) => r.trim());
             for (const rec of recommendations) {
                 const recItem = new FaultAnalysisNode(
                     recommendationsNode,

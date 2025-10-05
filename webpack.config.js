@@ -3,6 +3,7 @@
 const path = require('path');
 const child_process = require('child_process');
 const webpack = require('webpack'); // to access built-in plugins
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 const gitStatus = child_process
     .execSync('git status --short')
@@ -43,7 +44,17 @@ const extensionConfig = {
                 ]
             }
         ]
-    }
+    },
+    plugins: [
+        new CopyWebpackPlugin({
+            patterns: [
+                {
+                    from: 'src/frontend/views/waveform-client.js',
+                    to: 'waveform-client.js'
+                }
+            ]
+        })
+    ]
 };
 
 const adapterConfig = {

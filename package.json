@@ -36,12 +36,12 @@
                         "maximum": 300
                     },
                     "cortex-debug.waveformRefreshRate": {
-                        "default": 1.0,
+                        "default": 1,
                         "description": "Waveform display refresh rate in Hz",
                         "type": "number",
                         "multipleOf": 0.1,
                         "minimum": 0.1,
-                        "maximum": 20.0
+                        "maximum": 20
                     },
                     "cortex-debug.waveformMaxDataPoints": {
                         "default": 10000,
@@ -58,7 +58,12 @@
                     },
                     "cortex-debug.architecture": {
                         "type": "string",
-                        "enum": ["auto", "cortex-m", "riscv32", "riscv64"],
+                        "enum": [
+                            "auto",
+                            "cortex-m",
+                            "riscv32",
+                            "riscv64"
+                        ],
                         "default": "auto",
                         "description": "Target architecture for fault analysis. Use 'auto' for automatic detection based on toolchain prefix and device name"
                     },
@@ -71,7 +76,12 @@
                         "default": "professional",
                         "description": "Color scheme for waveform variables",
                         "type": "string",
-                        "enum": ["professional", "colorblind", "highContrast", "soft"]
+                        "enum": [
+                            "professional",
+                            "colorblind",
+                            "highContrast",
+                            "soft"
+                        ]
                     },
                     "cortex-debug.waveformAutoStart": {
                         "default": true,
@@ -82,15 +92,18 @@
                         "default": "auto",
                         "description": "Y-axis scaling mode for waveform display",
                         "type": "string",
-                        "enum": ["auto", "manual"]
+                        "enum": [
+                            "auto",
+                            "manual"
+                        ]
                     },
                     "cortex-debug.waveformYMin": {
-                        "default": -1.0,
+                        "default": -1,
                         "description": "Manual Y-axis minimum value (when Y-axis mode is manual)",
                         "type": "number"
                     },
                     "cortex-debug.waveformYMax": {
-                        "default": 1.0,
+                        "default": 1,
                         "description": "Manual Y-axis maximum value (when Y-axis mode is manual)",
                         "type": "number"
                     },
@@ -124,13 +137,21 @@
                         "default": "hanning",
                         "description": "Default FFT window function for frequency analysis",
                         "type": "string",
-                        "enum": ["hanning", "hamming", "blackman", "rectangular"]
+                        "enum": [
+                            "hanning",
+                            "hamming",
+                            "blackman",
+                            "rectangular"
+                        ]
                     },
                     "cortex-debug.waveformDataExportFormat": {
                         "default": "json",
                         "description": "Default format for waveform data export",
                         "type": "string",
-                        "enum": ["json", "csv"]
+                        "enum": [
+                            "json",
+                            "csv"
+                        ]
                     }
                 }
             },
@@ -3525,6 +3546,7 @@
         "@vscode/debugadapter": "^1.68.0",
         "@vscode/debugprotocol": "^1.68.0",
         "@vscode/test-electron": "^2.4.1",
+        "copy-webpack-plugin": "^13.0.1",
         "globals": "^15.14.0",
         "mocha": "^11.0.1",
         "ts-loader": "^9.5.2",

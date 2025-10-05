@@ -144,7 +144,7 @@ export class RiscVBacktrace implements IArchitectureBacktrace {
         }
 
         // Map exception code to fault type
-        switch (code) {
+        switch (code as RiscVExceptionCode) {
             case RiscVExceptionCode.INSTRUCTION_MISALIGNED:
                 return FaultType.INSTRUCTION_MISALIGNED;
             case RiscVExceptionCode.INSTRUCTION_FAULT:
@@ -193,7 +193,7 @@ export class RiscVBacktrace implements IArchitectureBacktrace {
                 break;
 
             case FaultType.INSTRUCTION_FAULT:
-                if (code === RiscVExceptionCode.INSTRUCTION_PAGE_FAULT) {
+                if ((code as RiscVExceptionCode) === RiscVExceptionCode.INSTRUCTION_PAGE_FAULT) {
                     causes.push(`Instruction page fault at address: 0x${mtval.toString(16).toUpperCase()}`);
                     causes.push('Virtual memory page not mapped or invalid PTE');
                 } else {
@@ -215,7 +215,7 @@ export class RiscVBacktrace implements IArchitectureBacktrace {
                 break;
 
             case FaultType.LOAD_FAULT:
-                if (code === RiscVExceptionCode.LOAD_PAGE_FAULT) {
+                if ((code as RiscVExceptionCode) === RiscVExceptionCode.LOAD_PAGE_FAULT) {
                     causes.push(`Load page fault at address: 0x${mtval.toString(16).toUpperCase()}`);
                     causes.push('Virtual memory page not mapped');
                 } else {
@@ -231,7 +231,7 @@ export class RiscVBacktrace implements IArchitectureBacktrace {
                 break;
 
             case FaultType.STORE_FAULT:
-                if (code === RiscVExceptionCode.STORE_PAGE_FAULT) {
+                if ((code as RiscVExceptionCode) === RiscVExceptionCode.STORE_PAGE_FAULT) {
                     causes.push(`Store page fault at address: 0x${mtval.toString(16).toUpperCase()}`);
                     causes.push('Virtual memory page not mapped or read-only');
                 } else {
@@ -241,11 +241,12 @@ export class RiscVBacktrace implements IArchitectureBacktrace {
                 causes.push('Check for writes to ROM or read-only memory');
                 break;
 
-            case FaultType.ECALL:
+            case FaultType.ECALL: {
                 const privilege = this.getPrivilegeLevel(mcause);
                 causes.push(`Environment call from ${privilege} mode at PC = 0x${mepc.toString(16).toUpperCase()}`);
                 causes.push('This is usually intentional (system call), not an error');
                 break;
+            }
 
             case FaultType.BREAKPOINT:
                 causes.push(`Breakpoint exception at PC = 0x${mepc.toString(16).toUpperCase()}`);
@@ -383,7 +384,7 @@ export class RiscVBacktrace implements IArchitectureBacktrace {
         const xlen = this.architecture === Architecture.RISCV64 ? 64 : 32;
         const code = mcause & ((1 << (xlen - 1)) - 1);
 
-        switch (code) {
+        switch (code as RiscVExceptionCode) {
             case RiscVExceptionCode.ECALL_U:
                 return 'User';
             case RiscVExceptionCode.ECALL_S:

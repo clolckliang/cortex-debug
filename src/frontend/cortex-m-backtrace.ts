@@ -194,23 +194,23 @@ export class CortexMBacktrace implements IArchitectureBacktrace {
     generateRecommendation(faultType: FaultType, causes: string[]): string {
         const recommendations: string[] = [];
 
-        if (causes.some(c => c.includes('Stack') || c.includes('stacking'))) {
+        if (causes.some((c) => c.includes('Stack') || c.includes('stacking'))) {
             recommendations.push('Check for stack overflow - increase stack size or reduce local variable usage');
         }
 
-        if (causes.some(c => c.includes('pointer') || c.includes('address'))) {
+        if (causes.some((c) => c.includes('pointer') || c.includes('address'))) {
             recommendations.push('Verify pointer initialization and bounds checking');
         }
 
-        if (causes.some(c => c.includes('Divide by zero'))) {
+        if (causes.some((c) => c.includes('Divide by zero'))) {
             recommendations.push('Add division by zero checks before arithmetic operations');
         }
 
-        if (causes.some(c => c.includes('Unaligned'))) {
+        if (causes.some((c) => c.includes('Unaligned'))) {
             recommendations.push('Ensure data structures are properly aligned or disable strict alignment checking');
         }
 
-        if (causes.some(c => c.includes('Undefined instruction'))) {
+        if (causes.some((c) => c.includes('Undefined instruction'))) {
             recommendations.push('Check for code corruption, invalid function pointers, or compiler optimization issues');
         }
 

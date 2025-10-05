@@ -24,7 +24,9 @@
       "Bash(npx tsc:*)",
       "WebSearch",
       "WebFetch(domain:www.segger.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(npm install --save-dev copy-webpack-plugin)",
+      "Bash(npx eslint src/frontend/views/waveform-client.js --fix)"
     ],
     "deny": [],
     "ask": []

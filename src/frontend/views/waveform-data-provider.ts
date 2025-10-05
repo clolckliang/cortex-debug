@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { LiveWatchTreeProvider, LiveVariableNode } from './live-watch';
-import { GraphPoint, GraphDataSource, WaveformVariable, DataSourceStats, SignalDisplayType, TriggerCondition, SignalStatistics } from '../../grapher/datasource';
+import {
+    GraphPoint, GraphDataSource, WaveformVariable, DataSourceStats,
+    SignalDisplayType, TriggerCondition, SignalStatistics
+} from '../../grapher/datasource';
 import { FFTAnalyzer, FFTResult, getDataPointsForFFT } from './fft-analyzer';
 
 export interface WaveformSettings {
@@ -776,7 +779,7 @@ export class WaveformDataProvider {
      * Get variables in a group
      */
     public getVariablesInGroup(group: string): WaveformVariable[] {
-        return Array.from(this.variables.values()).filter(v => v.group === group);
+        return Array.from(this.variables.values()).filter((v) => v.group === group);
     }
 
     /**

@@ -771,7 +771,7 @@ export class CortexDebugExtension {
         if (mySession.rtt) { mySession.rtt.debugStopped(); }
 
         // Check for fault when debug stops
-        this.checkForFault(e.session).catch(err => {
+        this.checkForFault(e.session).catch((err) => {
             console.error('Fault detection failed:', err);
         });
     }
@@ -993,9 +993,9 @@ export class CortexDebugExtension {
 
         if (isPointer) {
             const proceed = await vscode.window.showWarningMessage(
-                `Warning: '${node.getName()}' is a pointer (${nodeType}). ` +
-                'Modifying pointer values can cause memory corruption or system crashes. ' +
-                'Are you sure you want to continue?',
+                `Warning: '${node.getName()}' is a pointer (${nodeType}). `
+                + 'Modifying pointer values can cause memory corruption or system crashes. '
+                + 'Are you sure you want to continue?',
                 { modal: true },
                 'Yes, I understand the risks',
                 'Cancel'
@@ -1017,13 +1017,13 @@ export class CortexDebugExtension {
                 }
                 // Basic format validation
                 const trimmed = value.trim();
-                if (!/^-?\d+(\.\d+)?$/.test(trimmed) &&  // decimal
-                    !/^0[xX][0-9a-fA-F]+$/.test(trimmed) &&  // hex
-                    !/^0[bB][01]+$/.test(trimmed) &&  // binary
-                    !/^["'].*["']$/.test(trimmed) &&  // string
-                    !/^'.'$/.test(trimmed) &&  // char
-                    trimmed !== 'true' && trimmed !== 'false' &&  // bool
-                    !trimmed.includes('(')) {  // cast expression
+                if (!/^-?\d+(\.\d+)?$/.test(trimmed)  // decimal
+                    && !/^0[xX][0-9a-fA-F]+$/.test(trimmed)  // hex
+                    && !/^0[bB][01]+$/.test(trimmed)  // binary
+                    && !/^["'].*["']$/.test(trimmed)  // string
+                    && !/^'.'$/.test(trimmed)  // char
+                    && trimmed !== 'true' && trimmed !== 'false'  // bool
+                    && !trimmed.includes('(')) {  // cast expression
                     return 'Invalid format. Use decimal, hex (0x...), binary (0b...), or string ("...")';
                 }
                 return null;
@@ -1767,7 +1767,7 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
         const currentType = this.waveformDataProvider.getVariableDisplayType(expression);
 
         const selected = await vscode.window.showQuickPick(
-            displayTypes.map(dt => ({
+            displayTypes.map((dt) => ({
                 label: dt.label + (dt.value === currentType ? ' (current)' : ''),
                 description: dt.description,
                 value: dt.value
@@ -1867,7 +1867,7 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
         const items = [
             { label: '$(add) Create New Group', value: '__new__' },
             { label: '$(close) Remove from Group', value: '__none__' },
-            ...existingGroups.map(g => ({
+            ...existingGroups.map((g) => ({
                 label: g + (g === currentGroup ? ' (current)' : ''),
                 value: g
             }))
@@ -1906,7 +1906,7 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
     /**
      * Show signal statistics
      */
-    private async showSignalStatistics(node: any) {
+    private showSignalStatistics(node: any) {
         if (!node || !node.getExpr) {
             vscode.window.showErrorMessage('Invalid variable node');
             return;
@@ -1921,16 +1921,16 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
             return;
         }
 
-        const message = `Signal Statistics for ${variableName}:\n\n` +
-            `Min: ${stats.min.toFixed(3)}\n` +
-            `Max: ${stats.max.toFixed(3)}\n` +
-            `Average: ${stats.avg.toFixed(3)}\n` +
-            `RMS: ${stats.rms.toFixed(3)}\n` +
-            `Duty Cycle: ${stats.duty.toFixed(1)}%\n` +
-            (stats.frequency ? `Frequency: ${stats.frequency.toFixed(2)} Hz\n` : '') +
-            (stats.period ? `Period: ${(stats.period * 1000).toFixed(2)} ms\n` : '');
+        const message = `Signal Statistics for ${variableName}:\n\n`
+            + `Min: ${stats.min.toFixed(3)}\n`
+            + `Max: ${stats.max.toFixed(3)}\n`
+            + `Average: ${stats.avg.toFixed(3)}\n`
+            + `RMS: ${stats.rms.toFixed(3)}\n`
+            + `Duty Cycle: ${stats.duty.toFixed(1)}%\n`
+            + (stats.frequency ? `Frequency: ${stats.frequency.toFixed(2)} Hz\n` : '')
+            + (stats.period ? `Period: ${(stats.period * 1000).toFixed(2)} ms\n` : '');
 
-        vscode.window.showInformationMessage(message, { modal: false }, 'Copy to Clipboard').then((action) => {
+        void vscode.window.showInformationMessage(message, { modal: false }, 'Copy to Clipboard').then((action) => {
             if (action === 'Copy to Clipboard') {
                 vscode.env.clipboard.writeText(message);
             }
@@ -2129,7 +2129,7 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
                 `Fault Detected: ${analysis.faultType}`,
                 'Show Details',
                 'Dismiss'
-            ).then(choice => {
+            ).then((choice) => {
                 if (choice === 'Show Details' && this.faultAnalysisTreeView) {
                     this.faultAnalysisTreeView.reveal(null, { select: false, focus: true });
                 }

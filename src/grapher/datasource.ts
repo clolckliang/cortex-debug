@@ -407,16 +407,18 @@ export class GraphDataSource {
             case 'bit':
                 return value >= 0.5 ? '1' : '0';
 
-            case 'hex':
+            case 'hex': {
                 const intValue = Math.floor(value);
                 const hexStr = intValue.toString(16).toUpperCase();
                 const padLength = Math.ceil(bitWidth / 4);
                 return '0x' + hexStr.padStart(padLength, '0');
+            }
 
-            case 'binary':
+            case 'binary': {
                 const binValue = Math.floor(value);
                 const binStr = binValue.toString(2);
                 return '0b' + binStr.padStart(bitWidth, '0');
+            }
 
             case 'state':
                 return Math.floor(value).toString();

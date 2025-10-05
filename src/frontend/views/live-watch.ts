@@ -113,7 +113,7 @@ export class LiveVariableNode extends BaseNode {
 
         // Safety validation: Warn if setting pointer or address values
         if (this.type && (this.type.includes('*') || this.type.toLowerCase().includes('pointer'))) {
-            const confirmed = await this.confirmPointerModification();
+            const confirmed = this.confirmPointerModification();
             if (!confirmed) {
                 return false;
             }
@@ -213,7 +213,7 @@ export class LiveVariableNode extends BaseNode {
         return false;
     }
 
-    private async confirmPointerModification(): Promise<boolean> {
+    private confirmPointerModification(): boolean {
         // This method would ideally use vscode.window.showWarningMessage
         // but since we're in a node class, we'll return true for now
         // The calling code (extension.ts) can add additional confirmation

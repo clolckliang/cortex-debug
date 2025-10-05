@@ -135,8 +135,9 @@ export class CmBacktraceAnalyzer {
             const frames: CallStackFrame[] = [];
             for (const frame of stackTraceResponse.stackFrames) {
                 frames.push({
-                    pc: frame.instructionPointerReference ?
-                        parseInt(frame.instructionPointerReference, 16) : 0,
+                    pc: frame.instructionPointerReference
+                        ? parseInt(frame.instructionPointerReference, 16)
+                        : 0,
                     lr: 0,  // Will be filled by register reading if needed
                     function: frame.name,
                     file: frame.source?.path,
@@ -178,7 +179,7 @@ export class CmBacktraceAnalyzer {
     /**
      * Use addr2line to resolve address to file/line
      */
-    private addr2line(address: number, toolchainPrefix: string): Promise<{file: string; line: number; function?: string} | null> {
+    private addr2line(address: number, toolchainPrefix: string): Promise<{ file: string; line: number; function?: string } | null> {
         return new Promise((resolve, reject) => {
             if (!this.elfPath) {
                 resolve(null);
