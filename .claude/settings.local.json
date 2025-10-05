@@ -19,7 +19,12 @@
       "Bash(npm run compile:*)",
       "Bash(move:*)",
       "Bash(npm run package:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "Bash(npx tsc:*)",
+      "WebSearch",
+      "WebFetch(domain:www.segger.com)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

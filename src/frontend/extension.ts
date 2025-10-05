@@ -6,6 +6,8 @@ import { CortexDebugChannel } from '../dbgmsgs';
 import { LiveWatchTreeProvider, LiveVariableNode } from './views/live-watch';
 import { WaveformDataProvider } from './views/waveform-data-provider';
 import { WaveformWebviewPanel } from './views/waveform-webview';
+import { CmBacktraceAnalyzer } from './cmbacktrace';
+import { FaultAnalysisTreeProvider } from './views/fault-analysis-tree';
 
 import { RTTCore, SWOCore } from './swo/core';
 import {
@@ -49,6 +51,9 @@ export class CortexDebugExtension {
     private liveWatchTreeView: vscode.TreeView<LiveVariableNode>;
     private waveformDataProvider: WaveformDataProvider;
     private waveformWebview: WaveformWebviewPanel;
+    private cmBacktraceAnalyzer: CmBacktraceAnalyzer;
+    private faultAnalysisProvider: FaultAnalysisTreeProvider;
+    private faultAnalysisTreeView: vscode.TreeView<any>;
 
     private SVDDirectory: SVDInfo[] = [];
     private functionSymbols: SymbolInformation[] = null;
@@ -73,6 +78,13 @@ export class CortexDebugExtension {
         this.waveformDataProvider = new WaveformDataProvider(this.liveWatchProvider);
         this.waveformWebview = new WaveformWebviewPanel(this.context, this.liveWatchProvider, this.waveformDataProvider);
 
+        this.cmBacktraceAnalyzer = new CmBacktraceAnalyzer();
+        this.faultAnalysisProvider = new FaultAnalysisTreeProvider(this.context);
+        this.faultAnalysisTreeView = vscode.window.createTreeView('cortex-debug.faultAnalysis', {
+            treeDataProvider: this.faultAnalysisProvider,
+            showCollapseAll: true
+        });
+
         vscode.commands.executeCommand('setContext', `cortex-debug:${CortexDebugKeys.VARIABLE_DISPLAY_MODE}`,
             config.get(CortexDebugKeys.VARIABLE_DISPLAY_MODE, true));
 
@@ -95,6 +107,7 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToLiveWatch', this.addToLiveWatch.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveUp', this.moveUpLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveDown', this.moveDownLiveWatchExpr.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.setValue', this.setLiveWatchValue.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
 
@@ -107,12 +120,33 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.waveform.toggleVariable', this.toggleWaveformVariable.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.setStyle', this.setWaveformVariableStyle.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.setStyleFromNode', this.setWaveformVariableStyleFromNode.bind(this)),
+
+            // Enhanced LiveWatch-Waveform integration commands
+            vscode.commands.registerCommand('cortex-debug.liveWatch.configureForWaveform', this.configureVariableForWaveform.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.removeFromWaveform', this.removeFromWaveform.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.showInWaveform', this.showVariableInWaveform.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.startRecording', this.startWaveformRecording.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.stopRecording', this.stopWaveformRecording.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.exportData', this.exportWaveformData.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.importConfig', this.importWaveformConfig.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.exportConfig', this.exportWaveformConfig.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.fftAnalysis', this.performWaveformFFT.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.fftAnalysisFromNode', this.performWaveformFFTFromNode.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.updateSettings', this.updateWaveformSettings.bind(this)),
+
+            // Logic Analyzer display type commands
+            vscode.commands.registerCommand('cortex-debug.waveform.changeDisplayType', this.changeDisplayType.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.configureBitWidth', this.configureBitWidth.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.configureThreshold', this.configureThreshold.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.configureGroup', this.configureSignalGroup.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.showStatistics', this.showSignalStatistics.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.configureTrigger', this.configureTrigger.bind(this)),
+
+            // CmBacktrace fault analysis commands
+            vscode.commands.registerCommand('cortex-debug.analyzeFault', this.analyzeFault.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.showCallStack', this.showCallStack.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.faultAnalysis.jumpToSource', this.jumpToSource.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.faultAnalysis.clearFault', this.clearFault.bind(this)),
 
             vscode.workspace.onDidChangeConfiguration(this.settingsChanged.bind(this)),
             vscode.debug.onDidReceiveDebugSessionCustomEvent(this.receivedCustomEvent.bind(this)),
@@ -735,6 +769,11 @@ export class CortexDebugExtension {
         });
         if (mySession.swo) { mySession.swo.debugStopped(); }
         if (mySession.rtt) { mySession.rtt.debugStopped(); }
+
+        // Check for fault when debug stops
+        this.checkForFault(e.session).catch(err => {
+            console.error('Fault detection failed:', err);
+        });
     }
 
     private receivedContinuedEvent(e: vscode.DebugSessionCustomEvent) {
@@ -942,6 +981,75 @@ export class CortexDebugExtension {
         this.liveWatchProvider.moveDownNode(node);
     }
 
+    private async setLiveWatchValue(node: any): Promise<void> {
+        if (!node || !node.setValue) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        // Safety check: Warn if modifying pointer values
+        const nodeType = node.getType ? node.getType() : '';
+        const isPointer = nodeType && (nodeType.includes('*') || nodeType.toLowerCase().includes('pointer'));
+
+        if (isPointer) {
+            const proceed = await vscode.window.showWarningMessage(
+                `Warning: '${node.getName()}' is a pointer (${nodeType}). ` +
+                'Modifying pointer values can cause memory corruption or system crashes. ' +
+                'Are you sure you want to continue?',
+                { modal: true },
+                'Yes, I understand the risks',
+                'Cancel'
+            );
+
+            if (proceed !== 'Yes, I understand the risks') {
+                return;
+            }
+        }
+
+        const currentValue = node.getCopyValue ? node.getCopyValue() : '';
+        const newValue = await vscode.window.showInputBox({
+            prompt: `Set value for '${node.getName()}'${nodeType ? ` (${nodeType})` : ''}`,
+            placeHolder: 'Enter new value (e.g., 123, 0xFF, 0b1010, "string")',
+            value: currentValue,
+            validateInput: (value: string) => {
+                if (!value || value.trim().length === 0) {
+                    return 'Value cannot be empty';
+                }
+                // Basic format validation
+                const trimmed = value.trim();
+                if (!/^-?\d+(\.\d+)?$/.test(trimmed) &&  // decimal
+                    !/^0[xX][0-9a-fA-F]+$/.test(trimmed) &&  // hex
+                    !/^0[bB][01]+$/.test(trimmed) &&  // binary
+                    !/^["'].*["']$/.test(trimmed) &&  // string
+                    !/^'.'$/.test(trimmed) &&  // char
+                    trimmed !== 'true' && trimmed !== 'false' &&  // bool
+                    !trimmed.includes('(')) {  // cast expression
+                    return 'Invalid format. Use decimal, hex (0x...), binary (0b...), or string ("...")';
+                }
+                return null;
+            }
+        });
+
+        if (newValue !== undefined && newValue !== currentValue) {
+            try {
+                const success = await node.setValue(newValue);
+                if (success) {
+                    vscode.window.showInformationMessage(`Successfully set '${node.getName()}' to '${newValue}'`);
+                    // Refresh the tree view to show the new value
+                    const session = vscode.debug.activeDebugSession;
+                    if (session) {
+                        this.liveWatchProvider.refresh(session);
+                    }
+                } else {
+                    vscode.window.showErrorMessage(`Failed to set value for '${node.getName()}'`);
+                }
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Error setting variable value: ${errorMsg}`);
+            }
+        }
+    }
+
     private showWaveform(): void {
         this.waveformWebview.show();
     }
@@ -1130,70 +1238,6 @@ export class CortexDebugExtension {
         }
     }
 
-    private async exportWaveformData(): Promise<void> {
-        const variables = this.waveformDataProvider.getVariables();
-        if (variables.length === 0) {
-            vscode.window.showInformationMessage('No data to export');
-            return;
-        }
-
-        const defaultFormat = this.waveformDataProvider.getDefaultDataExportFormat();
-        const formatOptions = ['json', 'csv'];
-        const format = await vscode.window.showQuickPick(formatOptions, {
-            placeHolder: 'Select export format'
-        });
-
-        if (!format) return;
-
-        const data = this.waveformDataProvider.exportData(format as any);
-
-        const uri = await vscode.window.showSaveDialog({
-            filters: format === 'json' ? { 'JSON Files': ['json'] } : { 'CSV Files': ['csv'] },
-            defaultUri: vscode.Uri.file(`waveform_data.${format}`)
-        });
-
-        if (uri) {
-            fs.writeFileSync(uri.fsPath, data);
-            vscode.window.showInformationMessage(`Waveform data exported to ${uri.fsPath}`);
-        }
-    }
-
-    private async importWaveformConfig(): Promise<void> {
-        const uri = await vscode.window.showOpenDialog({
-            filters: { 'JSON Files': ['json'] },
-            canSelectMany: false
-        });
-
-        if (uri && uri.length > 0) {
-            try {
-                const configJson = fs.readFileSync(uri[0].fsPath, 'utf8');
-                const success = this.waveformDataProvider.importConfiguration(configJson);
-
-                if (success) {
-                    vscode.window.showInformationMessage(`Configuration imported successfully`);
-                } else {
-                    vscode.window.showErrorMessage('Failed to import configuration. Check the file format.');
-                }
-            } catch (error) {
-                vscode.window.showErrorMessage(`Failed to read configuration file: ${error}`);
-            }
-        }
-    }
-
-    private async exportWaveformConfig(): Promise<void> {
-        const config = this.waveformDataProvider.exportConfiguration();
-
-        const uri = await vscode.window.showSaveDialog({
-            filters: { 'JSON Files': ['json'] },
-            defaultUri: vscode.Uri.file('waveform_config.json')
-        });
-
-        if (uri) {
-            fs.writeFileSync(uri.fsPath, config);
-            vscode.window.showInformationMessage(`Configuration exported to ${uri.fsPath}`);
-        }
-    }
-
     private async performWaveformFFT(): Promise<void> {
         const variables = this.waveformDataProvider.getVariables();
         if (variables.length === 0) {
@@ -1232,23 +1276,20 @@ export class CortexDebugExtension {
 
         if (fftResult) {
             const dominantPhase = (fftResult.dominantFrequency.phase * 180 / Math.PI).toFixed(1);
-            const message = `
-FFT Analysis Results for ${selectedVar.label}:
-- Window Size: ${windowSize} samples
-- Window Function: ${windowFunction}
-- Sampling Rate: ${fftResult.samplingRate} Hz
-- Dominant Frequency: ${fftResult.dominantFrequency.frequency.toFixed(2)} Hz
-- Dominant Magnitude: ${fftResult.dominantFrequency.magnitude.toFixed(2)} dB
-- Dominant Phase: ${dominantPhase}°
-- Noise Floor: ${fftResult.noiseFloor.toFixed(2)} dB
-- Total Harmonic Distortion: ${(fftResult.thd * 100).toFixed(3)}%
-- Peak Count: ${fftResult.peaks.length}
-
-Top 3 Peaks:
-${fftResult.peaks.slice(0, 3).map((peak, i) =>
-    `${i + 1}. ${peak.frequency.toFixed(2)} Hz, ${peak.magnitude.toFixed(2)} dB, SNR: ${peak.snr.toFixed(1)} dB`
-).join('\n')}
-            `.trim();
+            const message = 'FFT Analysis Results for ' + selectedVar.label + ':\n'
+                + '- Window Size: ' + windowSize + ' samples\n'
+                + '- Window Function: ' + windowFunction + '\n'
+                + '- Sampling Rate: ' + fftResult.samplingRate + ' Hz\n'
+                + '- Dominant Frequency: ' + fftResult.dominantFrequency.frequency.toFixed(2) + ' Hz\n'
+                + '- Dominant Magnitude: ' + fftResult.dominantFrequency.magnitude.toFixed(2) + ' dB\n'
+                + '- Dominant Phase: ' + dominantPhase + '°\n'
+                + '- Noise Floor: ' + fftResult.noiseFloor.toFixed(2) + ' dB\n'
+                + '- Total Harmonic Distortion: ' + (fftResult.thd * 100).toFixed(3) + '%\n'
+                + '- Peak Count: ' + fftResult.peaks.length + '\n\n'
+                + 'Top 3 Peaks:\n'
+                + fftResult.peaks.slice(0, 3).map((peak, i) =>
+                    (i + 1) + '. ' + peak.frequency.toFixed(2) + ' Hz, ' + peak.magnitude.toFixed(2) + ' dB, SNR: ' + peak.snr.toFixed(1) + ' dB'
+                ).join('\n');
 
             vscode.window.showInformationMessage(message, 'Copy to Clipboard').then((action) => {
                 if (action === 'Copy to Clipboard') {
@@ -1258,51 +1299,6 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
         } else {
             vscode.window.showErrorMessage('Insufficient data for FFT analysis. Need at least ' + windowSize + ' data points.');
         }
-    }
-
-    private async updateWaveformSettings(): Promise<void> {
-        const settings = this.waveformDataProvider.getSettings();
-
-        const timeSpan = await vscode.window.showInputBox({
-            prompt: 'Time span in seconds',
-            value: settings.timeSpan.toString(),
-            validateInput: (value) => {
-                const num = parseFloat(value);
-                return (isNaN(num) || num <= 0) ? 'Please enter a positive number' : null;
-            }
-        });
-
-        if (!timeSpan) return;
-
-        const refreshRate = await vscode.window.showInputBox({
-            prompt: 'Refresh rate in Hz',
-            value: settings.refreshRate.toString(),
-            validateInput: (value) => {
-                const num = parseFloat(value);
-                return (isNaN(num) || num <= 0) ? 'Please enter a positive number' : null;
-            }
-        });
-
-        if (!refreshRate) return;
-
-        const maxDataPoints = await vscode.window.showInputBox({
-            prompt: 'Maximum data points per variable',
-            value: settings.maxDataPoints.toString(),
-            validateInput: (value) => {
-                const num = parseInt(value);
-                return (isNaN(num) || num <= 0) ? 'Please enter a positive integer' : null;
-            }
-        });
-
-        if (!maxDataPoints) return;
-
-        this.waveformDataProvider.updateSettings({
-            timeSpan: parseFloat(timeSpan),
-            refreshRate: parseFloat(refreshRate),
-            maxDataPoints: parseInt(maxDataPoints)
-        });
-
-        vscode.window.showInformationMessage('Waveform settings updated successfully');
     }
 
     private async setWaveformVariableStyleFromNode(node: any): Promise<void> {
@@ -1457,6 +1453,687 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
             });
         } else {
             vscode.window.showErrorMessage(`Insufficient data for FFT analysis. Need at least ${defaultWindowSize} data points.`);
+        }
+    }
+
+    // Enhanced LiveWatch-Waveform integration methods
+    private async configureVariableForWaveform(node: any) {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const variableName = node.getName();
+        const expression = node.getExpr();
+
+        // Quick add to waveform first
+        const success = this.waveformDataProvider.addVariable(node);
+        if (!success) {
+            vscode.window.showErrorMessage(`Failed to add variable ${variableName} to waveform`);
+            return;
+        }
+
+        // Open configuration dialog
+        const config = {
+            color: this.waveformDataProvider.getVariableColor(expression),
+            lineWidth: this.waveformDataProvider.getVariableLineWidth(expression),
+            lineStyle: this.waveformDataProvider.getVariableLineStyle(expression),
+            opacity: this.waveformDataProvider.getVariableOpacity(expression),
+            samplingRate: this.waveformDataProvider.getVariableSamplingRate(expression) || 1.0
+        };
+
+        const result = await vscode.window.showQuickPick([
+            { label: 'Change Color', description: 'Set waveform color', action: 'color' },
+            { label: 'Change Line Style', description: 'Set line appearance', action: 'style' },
+            { label: 'Change Sampling Rate', description: 'Set data collection frequency', action: 'sampling' },
+            { label: 'Enable/Disable', description: 'Toggle variable visibility', action: 'toggle' },
+            { label: 'Remove from Waveform', description: 'Remove variable from waveform view', action: 'remove' }
+        ], {
+            placeHolder: `Configure ${variableName} for waveform display`,
+            matchOnDescription: true
+        });
+
+        if (result) {
+            switch (result.action) {
+                case 'color':
+                    await this.changeVariableColor(expression, variableName);
+                    break;
+                case 'style':
+                    await this.changeVariableStyle(expression, variableName);
+                    break;
+                case 'sampling':
+                    await this.changeVariableSamplingRate(expression, variableName);
+                    break;
+                case 'toggle':
+                    this.waveformDataProvider.updateVariableSettings(expression, {
+                        enabled: !this.waveformDataProvider.getVariable(expression)?.enabled
+                    });
+                    this.waveformWebview?.toggleVariable(expression, !this.waveformDataProvider.getVariable(expression)?.enabled);
+                    this.waveformWebview?.refreshData();
+                    break;
+                case 'remove':
+                    this.removeFromWaveform(node);
+                    break;
+            }
+        }
+    }
+
+    private removeFromWaveform(node: any) {
+        if (node && node.getExpr) {
+            const success = this.waveformDataProvider.removeVariable(node.getExpr());
+            if (success) {
+                vscode.window.showInformationMessage(`Removed ${node.getName()} from waveform`);
+            } else {
+                vscode.window.showWarningMessage(`Variable ${node.getName()} was not in waveform`);
+            }
+        }
+    }
+
+    private showVariableInWaveform(node: any): void {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        // Add to waveform if not already there
+        const success = this.waveformDataProvider.addVariable(node);
+        if (success) {
+            // Show waveform view
+            this.showWaveform();
+
+            // Focus the specific variable in the waveform
+            setTimeout(() => {
+                this.waveformWebview?.show();
+                this.waveformWebview?.highlightVariable(node.getExpr());
+            }, 500);
+        }
+    }
+
+    private startWaveformRecording() {
+        this.waveformDataProvider.startRecording();
+        vscode.window.showInformationMessage('Waveform recording started');
+    }
+
+    private stopWaveformRecording() {
+        this.waveformDataProvider.stopRecording();
+        vscode.window.showInformationMessage('Waveform recording stopped');
+    }
+
+    private async exportWaveformData() {
+        const format = await vscode.window.showQuickPick([
+            { label: 'JSON', description: 'Export data as JSON format', value: 'json' },
+            { label: 'CSV', description: 'Export data as CSV format', value: 'csv' }
+        ], {
+            placeHolder: 'Select export format'
+        });
+
+        if (format) {
+            try {
+                const data = this.waveformDataProvider.exportData(format.value as 'json' | 'csv');
+
+                const uri = await vscode.window.showSaveDialog({
+                    filters: format.value === 'json' ? { 'JSON Files': ['json'] } : { 'CSV Files': ['csv'] },
+                    defaultUri: vscode.Uri.file(`waveform_data_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.${format.value}`)
+                });
+
+                if (uri) {
+                    const fs = await import('fs');
+                    fs.writeFileSync(uri.fsPath, data);
+                    vscode.window.showInformationMessage(`Waveform data exported to ${uri.fsPath}`);
+                }
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to export data: ${error}`);
+            }
+        }
+    }
+
+    private async importWaveformConfig() {
+        const uri = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            filters: { 'JSON Files': ['json'] },
+            title: 'Select waveform configuration file'
+        });
+
+        if (uri && uri.length > 0) {
+            try {
+                const fs = await import('fs');
+                const configData = JSON.parse(fs.readFileSync(uri[0].fsPath, 'utf8'));
+                this.waveformDataProvider.importConfiguration(configData);
+                vscode.window.showInformationMessage('Waveform configuration imported successfully');
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to import configuration: ${error}`);
+            }
+        }
+    }
+
+    private async exportWaveformConfig() {
+        try {
+            const config = this.waveformDataProvider.exportConfiguration();
+
+            const uri = await vscode.window.showSaveDialog({
+                filters: { 'JSON Files': ['json'] },
+                defaultUri: vscode.Uri.file(`waveform_config_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`)
+            });
+
+            if (uri) {
+                const fs = await import('fs');
+                fs.writeFileSync(uri.fsPath, JSON.stringify(config, null, 2));
+                vscode.window.showInformationMessage(`Waveform configuration exported to ${uri.fsPath}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to export configuration: ${error}`);
+        }
+    }
+
+    private async updateWaveformSettings() {
+        const currentSettings = this.waveformDataProvider.getSettings();
+
+        // Create a multi-step input dialog for settings
+        const timeSpan = await vscode.window.showInputBox({
+            prompt: 'Time span (seconds)',
+            value: currentSettings.timeSpan.toString(),
+            validateInput: (value) => {
+                const num = parseFloat(value);
+                return isNaN(num) || num <= 0 ? 'Please enter a positive number' : null;
+            }
+        });
+
+        if (timeSpan === undefined) return; // User cancelled
+
+        const refreshRate = await vscode.window.showInputBox({
+            prompt: 'Refresh rate (Hz)',
+            value: currentSettings.refreshRate.toString(),
+            validateInput: (value) => {
+                const num = parseFloat(value);
+                return isNaN(num) || num <= 0 || num > 20 ? 'Please enter a number between 0.1 and 20' : null;
+            }
+        });
+
+        if (refreshRate === undefined) return; // User cancelled
+
+        const maxDataPoints = await vscode.window.showInputBox({
+            prompt: 'Maximum data points',
+            value: currentSettings.maxDataPoints.toString(),
+            validateInput: (value) => {
+                const num = parseInt(value);
+                return isNaN(num) || num < 100 || num > 50000 ? 'Please enter a number between 100 and 50000' : null;
+            }
+        });
+
+        if (maxDataPoints === undefined) return; // User cancelled
+
+        // Apply settings
+        const newSettings = {
+            timeSpan: parseFloat(timeSpan),
+            refreshRate: parseFloat(refreshRate),
+            maxDataPoints: parseInt(maxDataPoints)
+        };
+
+        this.waveformDataProvider.updateSettings(newSettings);
+        vscode.window.showInformationMessage('Waveform settings updated');
+    }
+
+    private async changeVariableColor(expression: string, variableName: string) {
+        const colors = [
+            { label: 'Blue', value: '#1f77b4' },
+            { label: 'Orange', value: '#ff7f0e' },
+            { label: 'Green', value: '#2ca02c' },
+            { label: 'Red', value: '#d62728' },
+            { label: 'Purple', value: '#9467bd' },
+            { label: 'Brown', value: '#8c564b' },
+            { label: 'Pink', value: '#e377c2' },
+            { label: 'Gray', value: '#7f7f7f' },
+            { label: 'Olive', value: '#bcbd22' },
+            { label: 'Cyan', value: '#17becf' }
+        ];
+
+        const selected = await vscode.window.showQuickPick(colors, {
+            placeHolder: `Select color for ${variableName}`
+        });
+
+        if (selected) {
+            this.waveformDataProvider.updateVariableSettings(expression, { color: selected.value });
+            vscode.window.showInformationMessage(`Updated color for ${variableName}`);
+        }
+    }
+
+    private async changeVariableStyle(expression: string, variableName: string) {
+        const styles = [
+            { label: 'Solid Line', value: 'solid' },
+            { label: 'Dashed Line', value: 'dashed' },
+            { label: 'Dotted Line', value: 'dotted' }
+        ];
+
+        const lineWidths = [
+            { label: 'Thin (1px)', value: 1 },
+            { label: 'Normal (2px)', value: 2 },
+            { label: 'Thick (3px)', value: 3 },
+            { label: 'Extra Thick (4px)', value: 4 }
+        ];
+
+        const style = await vscode.window.showQuickPick(styles, {
+            placeHolder: `Select line style for ${variableName}`
+        });
+
+        if (style) {
+            const width = await vscode.window.showQuickPick(lineWidths, {
+                placeHolder: `Select line width for ${variableName}`
+            });
+
+            if (width) {
+                this.waveformDataProvider.updateVariableSettings(expression, {
+                    lineStyle: style.value as 'solid' | 'dashed' | 'dotted',
+                    lineWidth: width.value
+                });
+                vscode.window.showInformationMessage(`Updated style for ${variableName}`);
+            }
+        }
+    }
+
+    private async changeVariableSamplingRate(expression: string, variableName: string) {
+        const rate = await vscode.window.showInputBox({
+            prompt: 'Sampling rate (Hz)',
+            value: '1.0',
+            validateInput: (value) => {
+                const num = parseFloat(value);
+                return isNaN(num) || num <= 0 || num > 100 ? 'Please enter a number between 0.1 and 100' : null;
+            }
+        });
+
+        if (rate !== undefined) {
+            this.waveformDataProvider.updateVariableSettings(expression, {
+                samplingRate: parseFloat(rate)
+            });
+            vscode.window.showInformationMessage(`Updated sampling rate for ${variableName} to ${rate} Hz`);
+        }
+    }
+
+    // ========== Logic Analyzer Display Type Management ==========
+
+    /**
+     * Change display type for a waveform variable (Analog/Bit/State/Hex/Binary)
+     */
+    private async changeDisplayType(node: any) {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const variableName = node.getName();
+        const expression = node.getExpr();
+
+        // Get available display types
+        const displayTypes = this.waveformDataProvider.getAvailableDisplayTypes();
+        const currentType = this.waveformDataProvider.getVariableDisplayType(expression);
+
+        const selected = await vscode.window.showQuickPick(
+            displayTypes.map(dt => ({
+                label: dt.label + (dt.value === currentType ? ' (current)' : ''),
+                description: dt.description,
+                value: dt.value
+            })),
+            {
+                placeHolder: `Select display type for ${variableName}`,
+                matchOnDescription: true
+            }
+        );
+
+        if (selected) {
+            const success = this.waveformDataProvider.setVariableDisplayType(expression, selected.value);
+            if (success) {
+                vscode.window.showInformationMessage(`Set display type for ${variableName} to ${selected.label}`);
+
+                // If changing to bit/hex/binary/state, prompt for bit width configuration
+                if (['bit', 'hex', 'binary', 'state'].includes(selected.value)) {
+                    await this.configureBitWidth(expression, variableName);
+                }
+
+                this.waveformWebview?.refreshData();
+            } else {
+                vscode.window.showErrorMessage(`Failed to set display type for ${variableName}`);
+            }
+        }
+    }
+
+    /**
+     * Configure bit width for multi-bit signals
+     */
+    private async configureBitWidth(expression: string, variableName: string) {
+        const config = this.waveformDataProvider.getVariableBitConfig(expression);
+
+        const bitWidth = await vscode.window.showInputBox({
+            prompt: `Bit width for ${variableName}`,
+            value: config.bitWidth.toString(),
+            validateInput: (value) => {
+                const num = parseInt(value);
+                return isNaN(num) || num < 1 || num > 32 ? 'Please enter a number between 1 and 32' : null;
+            }
+        });
+
+        if (bitWidth !== undefined) {
+            this.waveformDataProvider.setVariableBitConfig(expression, {
+                bitWidth: parseInt(bitWidth)
+            });
+            vscode.window.showInformationMessage(`Set bit width for ${variableName} to ${bitWidth}`);
+        }
+    }
+
+    /**
+     * Configure digital threshold for bit display
+     */
+    private async configureThreshold(node: any) {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const variableName = node.getName();
+        const expression = node.getExpr();
+        const config = this.waveformDataProvider.getVariableBitConfig(expression);
+
+        const threshold = await vscode.window.showInputBox({
+            prompt: `Digital threshold for ${variableName} (0.0 - 1.0)`,
+            value: config.threshold.toString(),
+            validateInput: (value) => {
+                const num = parseFloat(value);
+                return isNaN(num) || num < 0 || num > 1 ? 'Please enter a number between 0.0 and 1.0' : null;
+            }
+        });
+
+        if (threshold !== undefined) {
+            this.waveformDataProvider.setVariableBitConfig(expression, {
+                threshold: parseFloat(threshold)
+            });
+            vscode.window.showInformationMessage(`Set threshold for ${variableName} to ${threshold}`);
+            this.waveformWebview?.refreshData();
+        }
+    }
+
+    /**
+     * Configure signal grouping
+     */
+    private async configureSignalGroup(node: any) {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const variableName = node.getName();
+        const expression = node.getExpr();
+        const currentGroup = this.waveformDataProvider.getVariableGroup(expression);
+        const existingGroups = this.waveformDataProvider.getSignalGroups();
+
+        // Show quick pick with existing groups and option to create new
+        const items = [
+            { label: '$(add) Create New Group', value: '__new__' },
+            { label: '$(close) Remove from Group', value: '__none__' },
+            ...existingGroups.map(g => ({
+                label: g + (g === currentGroup ? ' (current)' : ''),
+                value: g
+            }))
+        ];
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: `Select group for ${variableName}`
+        });
+
+        if (selected) {
+            if (selected.value === '__new__') {
+                const groupName = await vscode.window.showInputBox({
+                    prompt: 'Enter new group name',
+                    placeHolder: 'e.g., Motor Control, Sensors, etc.',
+                    validateInput: (value) => {
+                        return value.trim().length === 0 ? 'Group name cannot be empty' : null;
+                    }
+                });
+
+                if (groupName) {
+                    this.waveformDataProvider.setVariableGroup(expression, groupName.trim());
+                    vscode.window.showInformationMessage(`Added ${variableName} to group "${groupName}"`);
+                }
+            } else if (selected.value === '__none__') {
+                this.waveformDataProvider.setVariableGroup(expression, '');
+                vscode.window.showInformationMessage(`Removed ${variableName} from group`);
+            } else {
+                this.waveformDataProvider.setVariableGroup(expression, selected.value);
+                vscode.window.showInformationMessage(`Added ${variableName} to group "${selected.value}"`);
+            }
+
+            this.waveformWebview?.refreshData();
+        }
+    }
+
+    /**
+     * Show signal statistics
+     */
+    private async showSignalStatistics(node: any) {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const variableName = node.getName();
+        const expression = node.getExpr();
+        const stats = this.waveformDataProvider.getVariableStatistics(expression);
+
+        if (!stats) {
+            vscode.window.showWarningMessage(`No statistics available for ${variableName}. Start recording data first.`);
+            return;
+        }
+
+        const message = `Signal Statistics for ${variableName}:\n\n` +
+            `Min: ${stats.min.toFixed(3)}\n` +
+            `Max: ${stats.max.toFixed(3)}\n` +
+            `Average: ${stats.avg.toFixed(3)}\n` +
+            `RMS: ${stats.rms.toFixed(3)}\n` +
+            `Duty Cycle: ${stats.duty.toFixed(1)}%\n` +
+            (stats.frequency ? `Frequency: ${stats.frequency.toFixed(2)} Hz\n` : '') +
+            (stats.period ? `Period: ${(stats.period * 1000).toFixed(2)} ms\n` : '');
+
+        vscode.window.showInformationMessage(message, { modal: false }, 'Copy to Clipboard').then((action) => {
+            if (action === 'Copy to Clipboard') {
+                vscode.env.clipboard.writeText(message);
+            }
+        });
+    }
+
+    /**
+     * Configure trigger conditions
+     */
+    private async configureTrigger(node: any) {
+        if (!node || !node.getExpr) {
+            vscode.window.showErrorMessage('Invalid variable node');
+            return;
+        }
+
+        const variableName = node.getName();
+        const expression = node.getExpr();
+        const currentTrigger = this.waveformDataProvider.getVariableTrigger(expression);
+
+        // Show trigger type selection
+        const triggerTypes = [
+            { label: 'Rising Edge', value: 'rising', description: '0 → 1 transition' },
+            { label: 'Falling Edge', value: 'falling', description: '1 → 0 transition' },
+            { label: 'Change', value: 'change', description: 'Any value change' },
+            { label: 'Level', value: 'level', description: 'Compare to threshold value' },
+            { label: 'Disable Trigger', value: 'disable', description: 'Turn off trigger' }
+        ];
+
+        const selected = await vscode.window.showQuickPick(triggerTypes, {
+            placeHolder: `Select trigger type for ${variableName}`
+        });
+
+        if (!selected) {
+            return;
+        }
+
+        if (selected.value === 'disable') {
+            this.waveformDataProvider.setVariableTrigger(expression, {
+                enabled: false,
+                type: 'rising'
+            });
+            vscode.window.showInformationMessage(`Disabled trigger for ${variableName}`);
+            return;
+        }
+
+        const trigger: any = {
+            enabled: true,
+            type: selected.value
+        };
+
+        // If level trigger, get value and operator
+        if (selected.value === 'level') {
+            const operators = [
+                { label: '== (Equal to)', value: '==' },
+                { label: '!= (Not equal to)', value: '!=' },
+                { label: '> (Greater than)', value: '>' },
+                { label: '< (Less than)', value: '<' },
+                { label: '>= (Greater than or equal)', value: '>=' },
+                { label: '<= (Less than or equal)', value: '<=' }
+            ];
+
+            const op = await vscode.window.showQuickPick(operators, {
+                placeHolder: 'Select comparison operator'
+            });
+
+            if (!op) {
+                return;
+            }
+
+            const value = await vscode.window.showInputBox({
+                prompt: 'Enter threshold value',
+                validateInput: (v) => {
+                    return isNaN(parseFloat(v)) ? 'Please enter a valid number' : null;
+                }
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            trigger.operator = op.value;
+            trigger.value = parseFloat(value);
+        }
+
+        this.waveformDataProvider.setVariableTrigger(expression, trigger);
+        vscode.window.showInformationMessage(`Configured ${selected.label} trigger for ${variableName}`);
+    }
+
+    // ========== CmBacktrace Fault Analysis Methods ==========
+
+    /**
+     * Manually trigger fault analysis
+     */
+    private async analyzeFault() {
+        const session = CortexDebugExtension.getActiveCDSession();
+        if (!session) {
+            vscode.window.showErrorMessage('No active Cortex-Debug session');
+            return;
+        }
+
+        await this.cmBacktraceAnalyzer.setSession(session);
+
+        const analysis = await this.cmBacktraceAnalyzer.analyzeFault();
+        if (analysis) {
+            this.faultAnalysisProvider.updateAnalysis(analysis);
+
+            // Reveal the fault analysis view
+            if (this.faultAnalysisTreeView) {
+                this.faultAnalysisTreeView.reveal(null, { select: false, focus: true });
+            }
+        }
+    }
+
+    /**
+     * Show current call stack (can be called anytime)
+     */
+    private async showCallStack() {
+        const session = CortexDebugExtension.getActiveCDSession();
+        if (!session) {
+            vscode.window.showErrorMessage('No active Cortex-Debug session');
+            return;
+        }
+
+        await this.cmBacktraceAnalyzer.setSession(session);
+
+        const callStack = await this.cmBacktraceAnalyzer.getCurrentCallStack();
+
+        if (callStack.length === 0) {
+            vscode.window.showInformationMessage('No call stack available');
+            return;
+        }
+
+        // Display call stack as quick pick
+        const items = callStack.map((frame, index) => {
+            const location = frame.file && frame.line ? ` (${frame.file}:${frame.line})` : '';
+            return {
+                label: `#${index} ${frame.function || '??'}`,
+                description: `0x${frame.pc.toString(16).toUpperCase().padStart(8, '0')}${location}`,
+                frame
+            };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select a stack frame to navigate to source'
+        });
+
+        if (selected && selected.frame.file && selected.frame.line) {
+            await this.jumpToSource(selected.frame.file, selected.frame.line);
+        }
+    }
+
+    /**
+     * Jump to source file at specific line
+     */
+    private async jumpToSource(file: string, line: number) {
+        try {
+            const doc = await vscode.workspace.openTextDocument(file);
+            const editor = await vscode.window.showTextDocument(doc);
+            const position = new vscode.Position(line - 1, 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not open file: ${file}`);
+        }
+    }
+
+    /**
+     * Clear fault analysis
+     */
+    private clearFault() {
+        this.faultAnalysisProvider.clear();
+        vscode.window.showInformationMessage('Fault analysis cleared');
+    }
+
+    /**
+     * Automatically check for faults when debug stops
+     */
+    private async checkForFault(session: vscode.DebugSession) {
+        const config = this.getCurrentArgs(session);
+
+        // Check if auto fault detection is enabled
+        const autoDetect = vscode.workspace.getConfiguration('cortex-debug').get('autoFaultDetection', true);
+        if (!autoDetect) {
+            return;
+        }
+
+        await this.cmBacktraceAnalyzer.setSession(session);
+
+        const analysis = await this.cmBacktraceAnalyzer.analyzeFault();
+        if (analysis) {
+            // Update the tree view
+            this.faultAnalysisProvider.updateAnalysis(analysis);
+
+            // Show notification
+            vscode.window.showWarningMessage(
+                `Fault Detected: ${analysis.faultType}`,
+                'Show Details',
+                'Dismiss'
+            ).then(choice => {
+                if (choice === 'Show Details' && this.faultAnalysisTreeView) {
+                    this.faultAnalysisTreeView.reveal(null, { select: false, focus: true });
+                }
+            });
         }
     }
 }

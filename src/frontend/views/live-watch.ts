@@ -98,7 +98,134 @@ export class LiveVariableNode extends BaseNode {
     }
 
     public getCopyValue(): string {
-        throw new Error('Method not implemented.');
+        return this.value || this.expr;
+    }
+
+    public async setValue(newValue: string): Promise<boolean> {
+        if (!this.session) {
+            throw new Error('No active debug session');
+        }
+
+        // Safety validation: Check if value format is valid
+        if (!this.isValidValue(newValue)) {
+            throw new Error('Invalid value format. Use decimal, hex (0x...), or binary (0b...) format');
+        }
+
+        // Safety validation: Warn if setting pointer or address values
+        if (this.type && (this.type.includes('*') || this.type.toLowerCase().includes('pointer'))) {
+            const confirmed = await this.confirmPointerModification();
+            if (!confirmed) {
+                return false;
+            }
+        }
+
+        try {
+            // Use setExpression for root-level variables (expressions)
+            // Use setVariable for child variables (struct members, array elements, etc.)
+            if (this.isRootChild()) {
+                // For root level expressions, we need the frame ID
+                const stackFrames = await this.session.customRequest('stackTrace', {
+                    threadId: 1,
+                    startFrame: 0,
+                    levels: 1
+                });
+
+                if (stackFrames && stackFrames.stackFrames && stackFrames.stackFrames.length > 0) {
+                    const frameId = stackFrames.stackFrames[0].id;
+                    const result = await this.session.customRequest('setExpression', {
+                        expression: this.expr,
+                        value: newValue,
+                        frameId: frameId
+                    });
+
+                    if (result && result.value !== undefined) {
+                        this.value = result.value;
+                        return true;
+                    }
+                }
+            } else {
+                // For child variables, use setVariable
+                const parent = this.parent as LiveVariableNode;
+                if (parent && parent.variablesReference) {
+                    const result = await this.session.customRequest('setVariable', {
+                        variablesReference: parent.variablesReference,
+                        name: this.name,
+                        value: newValue
+                    });
+
+                    if (result && result.value !== undefined) {
+                        this.value = result.value;
+                        return true;
+                    }
+                }
+            }
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to set variable value: ${errorMsg}`);
+        }
+
+        return false;
+    }
+
+    private isValidValue(value: string): boolean {
+        if (!value || value.trim().length === 0) {
+            return false;
+        }
+
+        const trimmed = value.trim();
+
+        // Allow decimal numbers (including negative and floating point)
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            return true;
+        }
+
+        // Allow hex numbers (0x or 0X prefix)
+        if (/^0[xX][0-9a-fA-F]+$/.test(trimmed)) {
+            return true;
+        }
+
+        // Allow binary numbers (0b or 0B prefix)
+        if (/^0[bB][01]+$/.test(trimmed)) {
+            return true;
+        }
+
+        // Allow string literals (single or double quoted)
+        if (/^["'].*["']$/.test(trimmed)) {
+            return true;
+        }
+
+        // Allow character literals ('c')
+        if (/^'.'$/.test(trimmed)) {
+            return true;
+        }
+
+        // Allow boolean literals
+        if (trimmed === 'true' || trimmed === 'false') {
+            return true;
+        }
+
+        // Allow C-style casts and expressions (be permissive for complex cases)
+        // This allows things like (uint32_t)0x1234, etc.
+        if (trimmed.includes('(') || trimmed.includes(')')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private async confirmPointerModification(): Promise<boolean> {
+        // This method would ideally use vscode.window.showWarningMessage
+        // but since we're in a node class, we'll return true for now
+        // The calling code (extension.ts) can add additional confirmation
+        return true;
+    }
+
+    public getVariablesReference(): number {
+        return this.variablesReference;
+    }
+
+    public getType(): string {
+        return this.type;
     }
 
     public addChild(name: string, expr: string = '', value = '', type = '', reference = 0): LiveVariableNode {

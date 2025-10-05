@@ -51,6 +51,22 @@
                         "minimum": 1000,
                         "maximum": 50000
                     },
+                    "cortex-debug.autoFaultDetection": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Automatically detect and analyze faults when debugger stops (supports ARM Cortex-M and RISC-V)"
+                    },
+                    "cortex-debug.architecture": {
+                        "type": "string",
+                        "enum": ["auto", "cortex-m", "riscv32", "riscv64"],
+                        "default": "auto",
+                        "description": "Target architecture for fault analysis. Use 'auto' for automatic detection based on toolchain prefix and device name"
+                    },
+                    "cortex-debug.riscvToolchainPrefix": {
+                        "type": "string",
+                        "default": "",
+                        "description": "RISC-V toolchain prefix (e.g., 'riscv32-unknown-elf-' or 'riscv64-unknown-elf-'). Leave empty to use default based on architecture"
+                    },
                     "cortex-debug.waveformColorScheme": {
                         "default": "professional",
                         "description": "Color scheme for waveform variables",
@@ -545,6 +561,11 @@
                 "icon": "$(plus)"
             },
             {
+                "command": "cortex-debug.liveWatch.setValue",
+                "title": "Set Value...",
+                "icon": "$(edit)"
+            },
+            {
                 "category": "Cortex-Debug",
                 "command": "cortex-debug.examineMemory",
                 "title": "View Memory"
@@ -630,12 +651,102 @@
             {
                 "category": "Cortex-Debug",
                 "command": "cortex-debug.waveform.fftAnalysisFromNode",
-                "title": "Perform FFT Analysis"
+                "title": "Perform FFT Analysis",
+                "icon": "$(graph)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.analyzeFault",
+                "title": "Analyze Cortex-M Fault",
+                "icon": "$(bug)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.showCallStack",
+                "title": "Show Call Stack (CmBacktrace)",
+                "icon": "$(call-outgoing)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.faultAnalysis.jumpToSource",
+                "title": "Jump to Source"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.faultAnalysis.clearFault",
+                "title": "Clear Fault Analysis",
+                "icon": "$(clear-all)"
             },
             {
                 "category": "Cortex-Debug",
                 "command": "cortex-debug.waveform.updateSettings",
                 "title": "Update Waveform Settings"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.changeDisplayType",
+                "title": "Change Display Type...",
+                "icon": "$(symbol-enum)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.configureBitWidth",
+                "title": "Configure Bit Width...",
+                "icon": "$(symbol-number)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.configureThreshold",
+                "title": "Configure Digital Threshold...",
+                "icon": "$(settings)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.configureGroup",
+                "title": "Configure Signal Group...",
+                "icon": "$(group-by-ref-type)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.showStatistics",
+                "title": "Show Signal Statistics",
+                "icon": "$(graph)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.configureTrigger",
+                "title": "Configure Trigger...",
+                "icon": "$(debug-breakpoint-conditional)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.liveWatch.configureForWaveform",
+                "title": "Configure for Waveform...",
+                "icon": "$(settings-gear)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.liveWatch.removeFromWaveform",
+                "title": "Remove from Waveform",
+                "icon": "$(trash)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.liveWatch.showInWaveform",
+                "title": "Show in Waveform",
+                "icon": "$(eye)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.startRecording",
+                "title": "Start Waveform Recording",
+                "icon": "$(record)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.stopRecording",
+                "title": "Stop Waveform Recording",
+                "icon": "$(stop)"
             },
             {
                 "category": "Cortex-Debug",
@@ -3151,6 +3262,66 @@
                 {
                     "command": "cortex-debug.waveform.show",
                     "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.exportData",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.importConfig",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.exportConfig",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.updateSettings",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.changeDisplayType",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.configureBitWidth",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.configureThreshold",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.configureGroup",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.showStatistics",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.configureTrigger",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.startRecording",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.stopRecording",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.waveform.clearAll",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.analyzeFault",
+                    "when": "debugType === cortex-debug"
+                },
+                {
+                    "command": "cortex-debug.showCallStack",
+                    "when": "debugType === cortex-debug"
                 }
             ],
             "debug/toolBar": [
@@ -3164,37 +3335,87 @@
                 {
                     "command": "cortex-debug.liveWatch.editExpr",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "inline"
+                    "group": "inline@1"
+                },
+                {
+                    "command": "cortex-debug.liveWatch.setValue",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "inline@2"
                 },
                 {
                     "command": "cortex-debug.liveWatch.moveUp",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "inline"
+                    "group": "inline@3"
                 },
                 {
                     "command": "cortex-debug.liveWatch.moveDown",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "inline"
+                    "group": "inline@4"
                 },
                 {
                     "command": "cortex-debug.liveWatch.removeExpr",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "inline"
+                    "group": "inline@5"
                 },
                 {
                     "command": "cortex-debug.liveWatch.addToWaveform",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "inline"
+                    "group": "waveform@1"
+                },
+                {
+                    "command": "cortex-debug.liveWatch.configureForWaveform",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveform@2"
+                },
+                {
+                    "command": "cortex-debug.liveWatch.showInWaveform",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveform@3"
+                },
+                {
+                    "command": "cortex-debug.liveWatch.removeFromWaveform",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveform@4"
                 },
                 {
                     "command": "cortex-debug.waveform.setStyleFromNode",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "waveform"
+                    "group": "waveformAnalysis@1"
+                },
+                {
+                    "command": "cortex-debug.waveform.changeDisplayType",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveformAnalysis@2"
+                },
+                {
+                    "command": "cortex-debug.waveform.configureGroup",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveformAnalysis@3"
+                },
+                {
+                    "command": "cortex-debug.waveform.configureTrigger",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveformAnalysis@4"
+                },
+                {
+                    "command": "cortex-debug.waveform.showStatistics",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveformAnalysis@5"
                 },
                 {
                     "command": "cortex-debug.waveform.fftAnalysisFromNode",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
-                    "group": "waveform"
+                    "group": "waveformAnalysis@6"
+                },
+                {
+                    "command": "cortex-debug.faultAnalysis.jumpToSource",
+                    "when": "view == cortex-debug.faultAnalysis && viewItem == stackFrame",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "cortex-debug.faultAnalysis.clearFault",
+                    "when": "view == cortex-debug.faultAnalysis && viewItem == faultRoot",
+                    "group": "navigation@1"
                 }
             ],
             "view/title": [
@@ -3253,6 +3474,11 @@
                     "id": "cortex-debug.liveWatch",
                     "name": "Cortex Live Watch",
                     "when": "debugType == cortex-debug"
+                },
+                {
+                    "id": "cortex-debug.faultAnalysis",
+                    "name": "Fault Analysis",
+                    "when": "debugType == cortex-debug && cortex-debug:hasFault"
                 }
             ]
         },

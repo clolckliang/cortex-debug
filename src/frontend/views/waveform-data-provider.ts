@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { LiveWatchTreeProvider, LiveVariableNode } from './live-watch';
-import { GraphPoint, GraphDataSource, WaveformVariable, DataSourceStats } from '../../grapher/datasource';
+import { GraphPoint, GraphDataSource, WaveformVariable, DataSourceStats, SignalDisplayType, TriggerCondition, SignalStatistics } from '../../grapher/datasource';
 import { FFTAnalyzer, FFTResult, getDataPointsForFFT } from './fft-analyzer';
 
 export interface WaveformSettings {
@@ -95,7 +95,7 @@ export class WaveformDataProvider {
         console.log('Waveform data provider received debug event:', event.event);
     }
 
-    public addVariable(variable: LiveVariableNode): boolean {
+    public addVariable(variable: LiveVariableNode, displayType: SignalDisplayType = 'analog'): boolean {
         const expression = variable.getExpr();
         const name = variable.getName();
 
@@ -110,7 +110,14 @@ export class WaveformDataProvider {
             color: this.getNextColor(),
             enabled: true,
             lastValue: undefined,
-            unit: ''
+            unit: '',
+            displayType: displayType,
+            bitWidth: displayType === 'bit' ? 1 : 8,
+            threshold: 0.5,
+            trigger: {
+                enabled: false,
+                type: 'rising'
+            }
         };
 
         this.variables.set(expression, waveformVar);
@@ -172,7 +179,7 @@ export class WaveformDataProvider {
         return color;
     }
 
-    private startRecording(): void {
+    public startRecording(): void {
         if (this.isRecording) {
             return;
         }
@@ -191,7 +198,7 @@ export class WaveformDataProvider {
         this.startDataCollection();
     }
 
-    private stopRecording(): void {
+    public stopRecording(): void {
         this.isRecording = false;
         this.stopDataCollection();
     }
@@ -490,6 +497,38 @@ export class WaveformDataProvider {
         this.dataSource.clearData();
     }
 
+    public isRecordingActive(): boolean {
+        return this.isRecording;
+    }
+
+    // Enhanced variable style management
+    public getVariableColor(expression: string): string {
+        const variable = this.variables.get(expression);
+        return variable?.color || this.getNextColor();
+    }
+
+    public getVariableLineWidth(expression: string): number {
+        const variable = this.variables.get(expression);
+        return variable?.lineWidth || 2;
+    }
+
+    public getVariableLineStyle(expression: string): string {
+        const variable = this.variables.get(expression);
+        return variable?.lineStyle || 'solid';
+    }
+
+    public getVariableOpacity(expression: string): number {
+        const variable = this.variables.get(expression);
+        return variable?.opacity || 1.0;
+    }
+
+    public getVariableSamplingRate(expression: string): number | undefined {
+        const variable = this.variables.get(expression);
+        return variable?.samplingRate;
+    }
+
+    // Configuration management
+
     public getFFTAnalysis(variableId: string, windowSize: number = 512, windowFunction: string = 'hanning'): FFTResult | null {
         const data = this.getData(variableId);
 
@@ -613,6 +652,159 @@ export class WaveformDataProvider {
             console.error('Failed to import configuration:', error);
             return false;
         }
+    }
+
+    // Display type management methods for Logic Analyzer functionality
+
+    /**
+     * Get the display type for a variable
+     */
+    public getVariableDisplayType(variableId: string): SignalDisplayType {
+        const variable = this.variables.get(variableId);
+        return variable?.displayType || 'analog';
+    }
+
+    /**
+     * Set the display type for a variable (analog, bit, state, hex, binary)
+     */
+    public setVariableDisplayType(variableId: string, displayType: SignalDisplayType): boolean {
+        const variable = this.variables.get(variableId);
+        if (variable) {
+            variable.displayType = displayType;
+
+            // Adjust default bit width based on display type
+            if (displayType === 'bit' && !variable.bitWidth) {
+                variable.bitWidth = 1;
+            } else if ((displayType === 'hex' || displayType === 'binary' || displayType === 'state') && !variable.bitWidth) {
+                variable.bitWidth = 8; // Default to 8-bit for multi-bit displays
+            }
+
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get bit configuration for a variable
+     */
+    public getVariableBitConfig(variableId: string): { bitWidth: number; bitMask?: number; bitOffset?: number; threshold: number } {
+        const variable = this.variables.get(variableId);
+        return {
+            bitWidth: variable?.bitWidth || 1,
+            bitMask: variable?.bitMask,
+            bitOffset: variable?.bitOffset,
+            threshold: variable?.threshold || 0.5
+        };
+    }
+
+    /**
+     * Set bit configuration for a variable
+     */
+    public setVariableBitConfig(variableId: string, config: { bitWidth?: number; bitMask?: number; bitOffset?: number; threshold?: number }): boolean {
+        const variable = this.variables.get(variableId);
+        if (variable) {
+            if (config.bitWidth !== undefined) variable.bitWidth = config.bitWidth;
+            if (config.bitMask !== undefined) variable.bitMask = config.bitMask;
+            if (config.bitOffset !== undefined) variable.bitOffset = config.bitOffset;
+            if (config.threshold !== undefined) variable.threshold = config.threshold;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get trigger configuration for a variable
+     */
+    public getVariableTrigger(variableId: string): TriggerCondition | undefined {
+        const variable = this.variables.get(variableId);
+        return variable?.trigger;
+    }
+
+    /**
+     * Set trigger configuration for a variable
+     */
+    public setVariableTrigger(variableId: string, trigger: TriggerCondition): boolean {
+        const variable = this.variables.get(variableId);
+        if (variable) {
+            variable.trigger = trigger;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get signal statistics for a variable
+     */
+    public getVariableStatistics(variableId: string): SignalStatistics | null {
+        return this.dataSource.calculateSignalStatistics(variableId);
+    }
+
+    /**
+     * Get variable group
+     */
+    public getVariableGroup(variableId: string): string | undefined {
+        const variable = this.variables.get(variableId);
+        return variable?.group;
+    }
+
+    /**
+     * Set variable group for hierarchical display
+     */
+    public setVariableGroup(variableId: string, group: string): boolean {
+        const variable = this.variables.get(variableId);
+        if (variable) {
+            variable.group = group;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get all signal groups
+     */
+    public getSignalGroups(): string[] {
+        const groups = new Set<string>();
+        this.variables.forEach((variable) => {
+            if (variable.group) {
+                groups.add(variable.group);
+            }
+        });
+        return Array.from(groups).sort();
+    }
+
+    /**
+     * Get variables in a group
+     */
+    public getVariablesInGroup(group: string): WaveformVariable[] {
+        return Array.from(this.variables.values()).filter(v => v.group === group);
+    }
+
+    /**
+     * Format value based on display type
+     */
+    public formatVariableValue(variableId: string, value: number): string {
+        const variable = this.variables.get(variableId);
+        if (!variable) {
+            return value.toString();
+        }
+
+        const displayType = variable.displayType || 'analog';
+        const bitWidth = variable.bitWidth || 1;
+
+        return this.dataSource.formatValue(value, displayType, bitWidth);
+    }
+
+    /**
+     * Get available display types
+     */
+    public getAvailableDisplayTypes(): Array<{ label: string; value: SignalDisplayType; description: string }> {
+        return [
+            { label: 'Analog', value: 'analog', description: 'Continuous waveform display' },
+            { label: 'Bit/Digital', value: 'bit', description: 'Digital 0/1 signal' },
+            { label: 'State', value: 'state', description: 'Multi-state bus display' },
+            { label: 'Hexadecimal', value: 'hex', description: 'Hex value display' },
+            { label: 'Binary', value: 'binary', description: 'Binary value display' }
+        ];
     }
 
     public dispose(): void {
