@@ -58,36 +58,36 @@ export class CortexMBacktrace implements IArchitectureBacktrace {
     async readFaultRegisters(): Promise<Map<string, number>> {
         const registers = new Map<string, number>();
 
-        try {
-            // Read CFSR (Configurable Fault Status Register)
-            const cfsr = await this.readMemory32(SCB_REGISTERS.CFSR);
-            registers.set('CFSR', cfsr);
-            registers.set('MMFSR', cfsr & 0xFF);
-            registers.set('BFSR', (cfsr >> 8) & 0xFF);
-            registers.set('UFSR', (cfsr >> 16) & 0xFFFF);
+        // Wait a bit for OpenOCD to stabilize after halt (especially important at breakpoint hits)
+        // Increased delay to allow debug probe to fully initialize
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-            // Read HFSR (Hard Fault Status Register)
-            const hfsr = await this.readMemory32(SCB_REGISTERS.HFSR);
-            registers.set('HFSR', hfsr);
+        // Read CFSR (Configurable Fault Status Register)
+        const cfsr = await this.readMemory32(SCB_REGISTERS.CFSR);
+        registers.set('CFSR', cfsr);
+        registers.set('MMFSR', cfsr & 0xFF);
+        registers.set('BFSR', (cfsr >> 8) & 0xFF);
+        registers.set('UFSR', (cfsr >> 16) & 0xFFFF);
 
-            // Read DFSR (Debug Fault Status Register)
-            const dfsr = await this.readMemory32(SCB_REGISTERS.DFSR);
-            registers.set('DFSR', dfsr);
+        // Read HFSR (Hard Fault Status Register)
+        const hfsr = await this.readMemory32(SCB_REGISTERS.HFSR);
+        registers.set('HFSR', hfsr);
 
-            // Read MMFAR (MemManage Fault Address Register)
-            const mmfar = await this.readMemory32(SCB_REGISTERS.MMFAR);
-            registers.set('MMFAR', mmfar);
+        // Read DFSR (Debug Fault Status Register)
+        const dfsr = await this.readMemory32(SCB_REGISTERS.DFSR);
+        registers.set('DFSR', dfsr);
 
-            // Read BFAR (Bus Fault Address Register)
-            const bfar = await this.readMemory32(SCB_REGISTERS.BFAR);
-            registers.set('BFAR', bfar);
+        // Read MMFAR (MemManage Fault Address Register)
+        const mmfar = await this.readMemory32(SCB_REGISTERS.MMFAR);
+        registers.set('MMFAR', mmfar);
 
-            // Read AFSR (Auxiliary Fault Status Register)
-            const afsr = await this.readMemory32(SCB_REGISTERS.AFSR);
-            registers.set('AFSR', afsr);
-        } catch (error) {
-            throw new Error(`Failed to read fault registers: ${error}`);
-        }
+        // Read BFAR (Bus Fault Address Register)
+        const bfar = await this.readMemory32(SCB_REGISTERS.BFAR);
+        registers.set('BFAR', bfar);
+
+        // Read AFSR (Auxiliary Fault Status Register)
+        const afsr = await this.readMemory32(SCB_REGISTERS.AFSR);
+        registers.set('AFSR', afsr);
 
         return registers;
     }
@@ -223,15 +223,38 @@ export class CortexMBacktrace implements IArchitectureBacktrace {
 
     // Private helper methods (same as original implementation)
 
-    private async readMemory32(address: number): Promise<number> {
-        const result = await this.session.customRequest('readMemory', {
-            memoryReference: '0x' + address.toString(16),
-            count: 4
-        });
+    private async readMemory32(address: number, retries: number = 8): Promise<number> {
+        for (let attempt = 0; attempt < retries; attempt++) {
+            try {
+                const result = await this.session.customRequest('readMemory', {
+                    memoryReference: '0x' + address.toString(16),
+                    count: 4
+                });
 
-        if (result && result.data) {
-            const buffer = Buffer.from(result.data, 'base64');
-            return buffer.readUInt32LE(0);
+                if (result && result.data) {
+                    const buffer = Buffer.from(result.data, 'base64');
+                    return buffer.readUInt32LE(0);
+                }
+
+                return 0;
+            } catch (error) {
+                // If we get a "Busy" error and have retries left, wait and try again
+                const errorStr = String(error);
+
+                if (errorStr.includes('Busy') && attempt < retries - 1) {
+                    const waitTime = (attempt + 1) * 150;
+                    // Exponential backoff: wait longer with each retry (150ms, 300ms, 450ms, 600ms, 750ms, 900ms, 1050ms)
+                    await new Promise((resolve) => setTimeout(resolve, waitTime));
+                    continue;
+                }
+
+                // If we've exhausted retries or it's not a Busy error, log warning and return 0
+                // This prevents error messages during normal startup when debugger is initializing
+                if (attempt === retries - 1) {
+                    console.warn(`[Cortex-M Backtrace] Failed to read memory at 0x${address.toString(16)} after ${retries} attempts:`, error);
+                }
+                return 0;
+            }
         }
 
         return 0;

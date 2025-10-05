@@ -854,6 +854,13 @@ export class GDBDebugSession extends LoggingDebugSession {
                             await this.startGdbForLiveWatch(liveGdb);
                             this.handleMsg('stdout', 'Started live-monitor-gdb session\n');
                             this.miLiveGdb = liveGdb;
+
+                            // Start high-speed sampling if configured
+                            if (this.args.liveWatch.highSpeedSampling?.enabled) {
+                                const intervalMs = this.args.liveWatch.highSpeedSampling.intervalMs || 10;
+                                this.miLiveGdb.startSampling(intervalMs);
+                                this.handleMsg('stdout', `Live Watch high-speed sampling enabled: ${intervalMs}ms interval\n`);
+                            }
                         } catch (e) {
                             this.handleMsg('stderr', `Failed to start live-monitor-gdb session. Error: ${e}\n`);
                         }
@@ -1168,10 +1175,86 @@ export class GDBDebugSession extends LoggingDebugSession {
                             variables: []
                         }
                     };
-                    return this.miLiveGdb.variablesRequest(r, args);
+                    // Pass 'this' as the session parameter so response is sent correctly
+                    await this.miLiveGdb.variablesRequest(r, args, this);
                 } else {
+                    response.body = { variables: [] };
                     this.sendResponse(response);
                 }
+                break;
+            case 'liveStartSampling':
+                if (this.miLiveGdb) {
+                    const intervalMs = args.intervalMs || 10;
+                    this.miLiveGdb.startSampling(intervalMs);
+                    response.body = { success: true, intervalMs };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveStopSampling':
+                if (this.miLiveGdb) {
+                    this.miLiveGdb.stopSampling();
+                    response.body = { success: true };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveGetCachedSamples':
+                if (this.miLiveGdb) {
+                    const samples = this.miLiveGdb.getAllCachedSamples();
+                    const samplesArray = Array.from(samples.entries()).map(([name, data]) => ({
+                        name,
+                        ...data
+                    }));
+                    response.body = {
+                        samples: samplesArray,
+                        isSampling: this.miLiveGdb.isSampling()
+                    };
+                } else {
+                    response.body = { samples: [], isSampling: false };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveSetVariable':
+                if (this.miLiveGdb) {
+                    try {
+                        const result = await this.miLiveGdb.setVariable(
+                            args.variablesReference,
+                            args.name,
+                            args.value
+                        );
+                        response.body = result;
+                        response.success = true;
+                    } catch (error) {
+                        response.success = false;
+                        response.message = error instanceof Error ? error.message : String(error);
+                    }
+                } else {
+                    response.success = false;
+                    response.message = 'Live watch not enabled';
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveSetExpression':
+                if (this.miLiveGdb) {
+                    try {
+                        const result = await this.miLiveGdb.setExpression(
+                            args.expression,
+                            args.value
+                        );
+                        response.body = result;
+                        response.success = true;
+                    } catch (error) {
+                        response.success = false;
+                        response.message = error instanceof Error ? error.message : String(error);
+                    }
+                } else {
+                    response.success = false;
+                    response.message = 'Live watch not enabled';
+                }
+                this.sendResponse(response);
                 break;
             case 'is-global-or-static': {
                 const varRef = args.varRef;
@@ -2023,12 +2106,40 @@ export class GDBDebugSession extends LoggingDebugSession {
                 }
                 [threadId, frameId] = decodeReference(varRef);
             }
-            const res = await this.miDebugger.varAssign(name, args.value, threadId, frameId);
-            // TODO: Need to check for errors? Currently handled by outer try/catch
-            response.body = {
-                value: res.result('value')
-            };
-            this.sendResponse(response);
+
+            // Try to set the variable, if target is running, pause it temporarily
+            let needsResume = false;
+            try {
+                const res = await this.miDebugger.varAssign(name, args.value, threadId, frameId);
+                response.body = {
+                    value: res.result('value')
+                };
+                this.sendResponse(response);
+            } catch (err) {
+                const errorStr = String(err);
+                // Check if error is due to target running
+                if (errorStr.includes('Selected thread is running') || errorStr.includes('running')) {
+                    // Pause the target temporarily
+                    await this.miDebugger.sendCommand('exec-interrupt');
+                    // Wait a bit for the interrupt to take effect
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                    needsResume = true;
+
+                    // Try again now that target is stopped
+                    const res = await this.miDebugger.varAssign(name, args.value, threadId, frameId);
+                    response.body = {
+                        value: res.result('value')
+                    };
+                    this.sendResponse(response);
+                } else {
+                    throw err;
+                }
+            } finally {
+                // Resume if we paused
+                if (needsResume) {
+                    await this.miDebugger.sendCommand('exec-continue');
+                }
+            }
         } catch (err) {
             this.sendErrorResponse(response, 11, `Could not set variable '${args.name}'\n${err}`);
         }
@@ -2051,13 +2162,44 @@ export class GDBDebugSession extends LoggingDebugSession {
                 varObj.exp = exp;
                 varObj.id = varId;
             }
-            await this.miDebugger.exprAssign(varObjName, args.value, threadId, frameId);
-            const evalRsp = await this.evalExprInternal(args.expression, args.frameId, 'watch', threadId, frameId);
-            response.body = {
-                ...evalRsp,
-                value: evalRsp.result,
-            };
-            this.sendResponse(response);
+
+            // Try to set the expression, if target is running, pause it temporarily
+            let needsResume = false;
+            try {
+                await this.miDebugger.exprAssign(varObjName, args.value, threadId, frameId);
+                const evalRsp = await this.evalExprInternal(args.expression, args.frameId, 'watch', threadId, frameId);
+                response.body = {
+                    ...evalRsp,
+                    value: evalRsp.result,
+                };
+                this.sendResponse(response);
+            } catch (err) {
+                const errorStr = String(err);
+                // Check if error is due to target running
+                if (errorStr.includes('Selected thread is running') || errorStr.includes('running')) {
+                    // Pause the target temporarily
+                    await this.miDebugger.sendCommand('exec-interrupt');
+                    // Wait a bit for the interrupt to take effect
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                    needsResume = true;
+
+                    // Try again now that target is stopped
+                    await this.miDebugger.exprAssign(varObjName, args.value, threadId, frameId);
+                    const evalRsp = await this.evalExprInternal(args.expression, args.frameId, 'watch', threadId, frameId);
+                    response.body = {
+                        ...evalRsp,
+                        value: evalRsp.result,
+                    };
+                    this.sendResponse(response);
+                } else {
+                    throw err;
+                }
+            } finally {
+                // Resume if we paused
+                if (needsResume) {
+                    await this.miDebugger.sendCommand('exec-continue');
+                }
+            }
         } catch (err) {
             this.sendErrorResponse(response, 11, `Could not set expression '${args.expression}'\n${err}`);
         }

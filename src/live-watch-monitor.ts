@@ -7,6 +7,13 @@ import * as crypto from 'crypto';
 import { MINode } from './backend/mi_parse';
 import { expandValue } from './backend/gdb_expansion';
 
+interface SampleData {
+    timestamp: number;
+    value: string;
+    type?: string;
+    variablesReference?: number;
+}
+
 export type VariableType = string | VariableObject | ExtendedVariable;
 export interface NameToVarChangeInfo {
     [name: string]: any;
@@ -380,6 +387,11 @@ export class VariablesHandler {
 export class LiveWatchMonitor {
     public miDebugger: MI2 | undefined;
     protected varHandler: VariablesHandler;
+    private samplingTimer: NodeJS.Timeout | undefined;
+    private samplingIntervalMs: number = 10; // Default 10ms high-speed sampling
+    private samplingEnabled: boolean = false;
+    private cachedSamples: Map<string, SampleData> = new Map();
+
     constructor(private mainSession: GDBDebugSession) {
         this.varHandler = new VariablesHandler(
             (): boolean => false,
@@ -421,7 +433,234 @@ export class LiveWatchMonitor {
     }
 
     protected quitEvent() {
+        this.stopSampling();
         // this.miDebugger = undefined;
+    }
+
+    /**
+     * Start high-speed background sampling
+     * @param intervalMs Sampling interval in milliseconds (1-100ms recommended)
+     */
+    public startSampling(intervalMs: number = 10) {
+        this.samplingIntervalMs = Math.max(1, Math.min(100, intervalMs)); // Clamp to 1-100ms
+        this.samplingEnabled = true;
+
+        if (this.samplingTimer) {
+            clearInterval(this.samplingTimer);
+        }
+
+        this.samplingTimer = setInterval(() => {
+            this.performSampling();
+        }, this.samplingIntervalMs);
+
+        if (this.mainSession.args.showDevDebugOutput) {
+            this.mainSession.handleMsg('log', `LiveWatch: Started high-speed sampling at ${this.samplingIntervalMs}ms interval\n`);
+        }
+    }
+
+    /**
+     * Stop high-speed background sampling
+     */
+    public stopSampling() {
+        this.samplingEnabled = false;
+        if (this.samplingTimer) {
+            clearInterval(this.samplingTimer);
+            this.samplingTimer = undefined;
+        }
+        this.cachedSamples.clear();
+    }
+
+    /**
+     * Perform one sampling cycle - updates cache for all tracked variables
+     */
+    private performSampling() {
+        if (!this.miDebugger || !this.samplingEnabled) {
+            return;
+        }
+
+        try {
+            // Refresh the cache using existing mechanism
+            this.varHandler.refreshCachedChangeList(this.miDebugger, () => {
+                // Cache is now updated, store samples with timestamp
+                const timestamp = Date.now();
+
+                // Iterate through all cached variables and store their current values
+                if (this.varHandler.cachedChangeList) {
+                    for (const [varName, change] of Object.entries(this.varHandler.cachedChangeList)) {
+                        const varId = this.varHandler.variableHandlesReverse.get(varName);
+                        if (varId !== undefined) {
+                            const varObj = this.varHandler.variableHandles.get(varId) as VariableObject;
+                            if (varObj) {
+                                this.cachedSamples.set(varName, {
+                                    timestamp,
+                                    value: varObj.value || '',
+                                    type: varObj.type,
+                                    variablesReference: varObj.isCompound() ? varId : 0
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('stderr', `LiveWatch sampling error: ${error}\n`);
+            }
+        }
+    }
+
+    /**
+     * Get cached sample data for a variable
+     * @param varName GDB variable name
+     */
+    public getCachedSample(varName: string): SampleData | undefined {
+        return this.cachedSamples.get(varName);
+    }
+
+    /**
+     * Get all cached samples
+     */
+    public getAllCachedSamples(): Map<string, SampleData> {
+        return new Map(this.cachedSamples);
+    }
+
+    /**
+     * Check if sampling is currently active
+     */
+    public isSampling(): boolean {
+        return this.samplingEnabled && this.samplingTimer !== undefined;
+    }
+
+    /**
+     * Set a variable value while running (using Live GDB connection)
+     * This allows modifying variables without stopping the target
+     */
+    public async setVariable(
+        variablesReference: number,
+        name: string,
+        value: string
+    ): Promise<DebugProtocol.SetVariableResponse['body']> {
+        if (!this.miDebugger) {
+            throw new Error('Live GDB not available');
+        }
+
+        try {
+            const varObj = this.varHandler.variableHandles.get(variablesReference) as VariableObject;
+            if (!varObj || !(varObj instanceof VariableObject)) {
+                throw new Error(`Invalid variable reference: ${variablesReference}`);
+            }
+
+            // Find the child variable
+            const childGdbName = varObj.children[name];
+            if (!childGdbName) {
+                // List available children for debugging
+                const availableChildren = Object.keys(varObj.children).join(', ');
+                throw new Error(`Child variable '${name}' not found. Available children: ${availableChildren || 'none'}`);
+            }
+
+            // Use GDB's var-assign command to set the value
+            const result = await this.miDebugger.sendCommand(`var-assign ${childGdbName} ${value}`);
+            const newValue = result.result('value');
+
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('log', `LiveGDB: Set ${childGdbName} (${name}) = ${newValue}\n`);
+            }
+
+            // Update the cached value
+            const varId = this.varHandler.variableHandlesReverse.get(childGdbName);
+            if (varId !== undefined) {
+                const childObj = this.varHandler.variableHandles.get(varId) as VariableObject;
+                if (childObj) {
+                    childObj.value = newValue;
+                }
+            }
+
+            return {
+                value: newValue,
+                type: undefined,
+                variablesReference: 0,
+                namedVariables: 0,
+                indexedVariables: 0
+            };
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('stderr', `LiveGDB: Failed to set variable ${name}: ${errorMsg}\n`);
+            }
+            throw new Error(`Failed to set variable: ${errorMsg}`);
+        }
+    }
+
+    /**
+     * Set an expression value while running (for root-level variables)
+     */
+    public async setExpression(
+        expression: string,
+        value: string
+    ): Promise<DebugProtocol.SetExpressionResponse['body']> {
+        if (!this.miDebugger) {
+            throw new Error('Live GDB not available');
+        }
+
+        try {
+            // First, evaluate to get the variable object name
+            const evalArg: DebugProtocol.EvaluateArguments = {
+                expression: expression,
+                context: 'watch'
+            };
+
+            const evalResponse: DebugProtocol.EvaluateResponse = {
+                seq: 0,
+                type: 'response',
+                request_seq: 0,
+                command: 'evaluate',
+                success: true,
+                body: {
+                    result: undefined,
+                    variablesReference: undefined
+                }
+            };
+
+            await this.evaluateRequest(evalResponse, evalArg);
+
+            if (!evalResponse.success || !evalResponse.body) {
+                throw new Error(`Could not evaluate expression: ${expression}`);
+            }
+
+            // Now get the GDB variable name from the cache
+            const hasher = crypto.createHash('sha256');
+            hasher.update(expression);
+            const exprName = hasher.digest('hex');
+            const varObjName = `watch_${exprName}`;
+
+            // Use var-assign to set the value
+            const result = await this.miDebugger.sendCommand(`var-assign ${varObjName} ${value}`);
+            const newValue = result.result('value');
+
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('log', `LiveGDB: Set ${expression} = ${newValue}\n`);
+            }
+
+            // Update the cached value
+            const varId = this.varHandler.variableHandlesReverse.get(varObjName);
+            if (varId !== undefined) {
+                const varObj = this.varHandler.variableHandles.get(varId) as VariableObject;
+                if (varObj) {
+                    varObj.value = newValue;
+                }
+            }
+
+            return {
+                value: newValue,
+                type: undefined,
+                variablesReference: 0,
+                namedVariables: 0,
+                indexedVariables: 0
+            };
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to set expression: ${errorMsg}`);
+        }
     }
 
     public evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): Promise<void> {
@@ -429,15 +668,29 @@ export class LiveWatchMonitor {
             args.frameId = undefined;       // We don't have threads or frames here. We always evaluate in global context
             this.varHandler.evaluateRequest(response, args, this.miDebugger, this.mainSession, true).finally(() => {
                 if (this.mainSession.args.showDevDebugOutput) {
-                    this.mainSession.handleMsg('log', `LiveGBD: Evaluated ${args.expression}\n`);
+                    this.mainSession.handleMsg('log',
+                        `LiveGDB: Evaluated ${args.expression}, `
+                        + `result=${response.body?.result}, `
+                        + `varRef=${response.body?.variablesReference}, `
+                        + `type=${response.body?.type}\n`
+                    );
                 }
                 resolve();
             });
         });
     }
 
-    public async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments): Promise<void> {
-        const ret = await this.varHandler.variablesChildrenRequest(response, args, this.miDebugger, this.mainSession);
+    public async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, session?: GDBDebugSession): Promise<void> {
+        const useSession = session || this.mainSession;
+        if (this.mainSession.args.showDevDebugOutput) {
+            this.mainSession.handleMsg('log', `LiveGDB: variablesRequest for varRef=${args.variablesReference}\n`);
+        }
+        const ret = await this.varHandler.variablesChildrenRequest(response, args, this.miDebugger, useSession);
+        if (this.mainSession.args.showDevDebugOutput) {
+            this.mainSession.handleMsg('log',
+                `LiveGDB: variablesRequest returned ${response.body?.variables?.length || 0} variables\n`
+            );
+        }
         return ret;
     }
 
@@ -457,6 +710,7 @@ export class LiveWatchMonitor {
         try {
             if (!this.quitting) {
                 this.quitting = true;
+                this.stopSampling();
                 this.miDebugger.detach();
             }
         } catch (e) {

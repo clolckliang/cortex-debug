@@ -4,6 +4,7 @@ import * as path from 'path';
 
 import { CortexDebugChannel } from '../dbgmsgs';
 import { LiveWatchTreeProvider, LiveVariableNode } from './views/live-watch';
+import { EditableLiveWatchPanel } from './views/editable-live-watch';
 import { WaveformDataProvider } from './views/waveform-data-provider';
 import { WaveformWebviewPanel } from './views/waveform-webview';
 import { CmBacktraceAnalyzer } from './cmbacktrace';
@@ -112,6 +113,7 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.waveform.show', this.showWaveform.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.editableLiveWatch.show', this.showEditableLiveWatch.bind(this)),
 
             // Waveform-related commands
             vscode.commands.registerCommand('cortex-debug.waveform.addVariable', this.addWaveformVariable.bind(this)),
@@ -1052,6 +1054,13 @@ export class CortexDebugExtension {
 
     private showWaveform(): void {
         this.waveformWebview.show();
+    }
+
+    private showEditableLiveWatch(): void {
+        EditableLiveWatchPanel.createOrShow(
+            vscode.Uri.file(this.context.extensionPath),
+            this.liveWatchProvider
+        );
     }
 
     private addToWaveform(node: any) {
@@ -2119,7 +2128,9 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
 
         await this.cmBacktraceAnalyzer.setSession(session);
 
-        const analysis = await this.cmBacktraceAnalyzer.analyzeFault();
+        // Don't show messages for automatic checks - only detect actual faults
+        const analysis = await this.cmBacktraceAnalyzer.analyzeFault(false);
+
         if (analysis) {
             // Update the tree view
             this.faultAnalysisProvider.updateAnalysis(analysis);

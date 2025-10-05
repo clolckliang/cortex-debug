@@ -26,7 +26,10 @@
       "WebFetch(domain:www.segger.com)",
       "WebFetch(domain:github.com)",
       "Bash(npm install --save-dev copy-webpack-plugin)",
-      "Bash(npx eslint src/frontend/views/waveform-client.js --fix)"
+      "Bash(npx eslint src/frontend/views/waveform-client.js --fix)",
+      "Bash(npx vsce package)",
+      "Bash(npx vsce package --pre-release)",
+      "Bash(npx vsce package --pre-release --no-dependencies)"
     ],
     "deny": [],
     "ask": []

@@ -615,6 +615,12 @@
             },
             {
                 "category": "Cortex-Debug",
+                "command": "cortex-debug.editableLiveWatch.show",
+                "title": "Show Editable Live Watch Table",
+                "icon": "$(table)"
+            },
+            {
+                "category": "Cortex-Debug",
                 "command": "cortex-debug.liveWatch.addToWaveform",
                 "title": "Add to Waveform",
                 "icon": "$(graph)"
@@ -3443,7 +3449,12 @@
                 {
                     "command": "cortex-debug.liveWatch.addExpr",
                     "when": "view == cortex-debug.liveWatch",
-                    "group": "navigation"
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "cortex-debug.editableLiveWatch.show",
+                    "when": "view == cortex-debug.liveWatch",
+                    "group": "navigation@2"
                 },
                 {
                     "command": "cortex-debug.varHexModeTurnOn",
@@ -3567,10 +3578,10 @@
         "embedded"
     ],
     "extensionDependencies": [
-        "cortex-debug.debug-tracker-vscode",
-        "cortex-debug.memory-view",
-        "cortex-debug.rtos-views",
-        "cortex-debug.peripheral-viewer"
+        "mcu-debug.debug-tracker-vscode",
+        "mcu-debug.memory-view",
+        "mcu-debug.rtos-views",
+        "mcu-debug.peripheral-viewer"
     ],
     "main": "./dist/extension.js",
     "name": "cortex-debug",

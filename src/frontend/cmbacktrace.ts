@@ -58,15 +58,20 @@ export class CmBacktraceAnalyzer {
 
     /**
      * Main entry point for fault analysis
+     * @param showMessages Whether to show user messages (error/info dialogs)
      */
-    public async analyzeFault(): Promise<FaultAnalysis | null> {
+    public async analyzeFault(showMessages: boolean = true): Promise<FaultAnalysis | null> {
         if (!this.session) {
-            vscode.window.showErrorMessage('No active debug session');
+            if (showMessages) {
+                vscode.window.showErrorMessage('No active debug session');
+            }
             return null;
         }
 
         if (!this.backtrace) {
-            vscode.window.showErrorMessage('Architecture not supported or not detected');
+            if (showMessages) {
+                vscode.window.showErrorMessage('Architecture not supported or not detected');
+            }
             return null;
         }
 
@@ -78,7 +83,10 @@ export class CmBacktraceAnalyzer {
             const faultType = this.backtrace.determineFaultType(registers);
 
             if (faultType === FaultType.NONE) {
-                vscode.window.showInformationMessage('No fault detected');
+                // Only show message if explicitly requested
+                if (showMessages) {
+                    vscode.window.showInformationMessage('No fault detected');
+                }
                 return null;
             }
 
@@ -107,7 +115,11 @@ export class CmBacktraceAnalyzer {
                 architecture: this.backtrace.getArchitecture()
             };
         } catch (error) {
-            vscode.window.showErrorMessage(`Fault analysis failed: ${error}`);
+            // Log error for debugging but don't show message for automatic checks
+            console.error('[CmBacktrace] Fault analysis error:', error);
+            if (showMessages) {
+                vscode.window.showErrorMessage(`Fault analysis failed: ${error}`);
+            }
             return null;
         }
     }

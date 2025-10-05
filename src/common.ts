@@ -240,6 +240,11 @@ export interface SymbolFile {
 export interface LiveWatchConfig {
     enabled: boolean;
     samplesPerSecond?: number;
+    // High-speed background sampling configuration (independent of display rate)
+    highSpeedSampling?: {
+        enabled?: boolean;      // Enable high-speed background sampling
+        intervalMs?: number;    // Sampling interval in milliseconds (1-100ms, default 10ms)
+    };
 }
 
 // Helper function to create a symbolFile object properly with required elements

@@ -78,22 +78,45 @@ export class LiveVariableNode extends BaseNode {
 
         const parts = this.name.startsWith('\'') && this.isRootChild() ? this.name.split('\'::') : [this.name];
         const name = parts.pop();
+
+        // Check if value is changing (different from previous value)
+        const isChanging = this.prevValue && (this.prevValue !== this.value);
+
         const label: vscode.TreeItemLabel = {
             label: name + ': ' + (this.value || 'not available')
         };
-        if (this.prevValue && (this.prevValue !== this.value)) {
+
+        if (isChanging) {
+            // Highlight the value part when it changes
             label.highlights = [[name.length + 2, label.label.length]];
         }
         this.prevValue = this.value;
 
         const item = new TreeItem(label, state);
         item.contextValue = this.isRootChild() ? 'expression' : 'field';
+
+        // Add click command to set value (only for leaf nodes with no children)
+        if (state === TreeItemCollapsibleState.None) {
+            item.command = {
+                command: 'cortex-debug.liveWatch.setValue',
+                title: 'Set Value',
+                arguments: [this]
+            };
+        }
+
         let file = parts.length ? parts[0].slice(1) : '';
         if (file) {
             const cwd = this.session?.configuration?.cwd;
             file = cwd ? getPathRelative(cwd, file) : file;
         }
-        item.tooltip = (file ? 'File: ' + file + '\n' : '') + this.type;
+        item.tooltip = (file ? 'File: ' + file + '\n' : '') + this.type + (isChanging ? '\n(Value changing)' : '');
+
+        // Apply visual indicator for changing values
+        if (isChanging) {
+            // Add a yellow dot icon to indicate the value is changing
+            item.iconPath = new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.yellow'));
+        }
+
         return item;
     }
 
@@ -120,34 +143,24 @@ export class LiveVariableNode extends BaseNode {
         }
 
         try {
-            // Use setExpression for root-level variables (expressions)
-            // Use setVariable for child variables (struct members, array elements, etc.)
+            // Use Live GDB connection to set values while running
+            // This allows modifying variables without stopping the target (like Keil)
             if (this.isRootChild()) {
-                // For root level expressions, we need the frame ID
-                const stackFrames = await this.session.customRequest('stackTrace', {
-                    threadId: 1,
-                    startFrame: 0,
-                    levels: 1
+                // For root level expressions, use liveSetExpression
+                const result = await this.session.customRequest('liveSetExpression', {
+                    expression: this.expr,
+                    value: newValue
                 });
 
-                if (stackFrames && stackFrames.stackFrames && stackFrames.stackFrames.length > 0) {
-                    const frameId = stackFrames.stackFrames[0].id;
-                    const result = await this.session.customRequest('setExpression', {
-                        expression: this.expr,
-                        value: newValue,
-                        frameId: frameId
-                    });
-
-                    if (result && result.value !== undefined) {
-                        this.value = result.value;
-                        return true;
-                    }
+                if (result && result.value !== undefined) {
+                    this.value = result.value;
+                    return true;
                 }
             } else {
-                // For child variables, use setVariable
+                // For child variables, use liveSetVariable
                 const parent = this.parent as LiveVariableNode;
                 if (parent && parent.variablesReference) {
-                    const result = await this.session.customRequest('setVariable', {
+                    const result = await this.session.customRequest('liveSetVariable', {
                         variablesReference: parent.variablesReference,
                         name: this.name,
                         value: newValue
@@ -305,9 +318,17 @@ export class LiveVariableNode extends BaseNode {
     private namedVariables: number = 0;
     private indexedVariables: number = 0;
     private refreshChildren(resolve: () => void) {
+        console.log(
+            `[LiveWatch] refreshChildren: name=${this.name}, session=${!!this.session}, `
+            + `LiveWatchTreeProvider.session=${!!LiveWatchTreeProvider.session}, `
+            + `expanded=${this.expanded}, variablesReference=${this.variablesReference}`
+        );
+
         if (!LiveWatchTreeProvider.session || (this.session !== LiveWatchTreeProvider.session)) {
+            console.log(`[LiveWatch] refreshChildren early return: session mismatch`);
             resolve();
         } else if (this.expanded && (this.variablesReference > 0)) {
+            console.log(`[LiveWatch] refreshChildren: fetching children for ${this.name} with varRef=${this.variablesReference}`);
             // TODO: Implement limits on number of children in adapter and then here
             // const start = this.children?.length ?? 0;
             const varg: DebugProtocol.VariablesArguments = {
@@ -324,10 +345,14 @@ export class LiveVariableNode extends BaseNode {
                     children: child.children
                 };
             }
+            console.log(`[LiveWatch] Calling customRequest('liveVariables', ${JSON.stringify(varg)})`);
             this.session.customRequest('liveVariables', varg).then((result) => {
+                console.log(`[LiveWatch] liveVariables response for ${this.name}:`, result);
                 if (!result?.variables?.length) {
+                    console.log(`[LiveWatch] No variables in response for ${this.name}`);
                     this.children = undefined;
                 } else {
+                    console.log(`[LiveWatch] Got ${result.variables.length} children for ${this.name}`);
                     this.children = [];
                     for (const variable of result.variables ?? []) {
                         const ch = new LiveVariableNode(
@@ -343,8 +368,10 @@ export class LiveVariableNode extends BaseNode {
                             ch.prevValue = oldState.value;
                             ch.children = oldState.children;     // These will get refreshed later
                         }
+                        // IMPORTANT: Set session for child nodes
                         ch.session = this.session;
                         this.children.push(ch);
+                        console.log(`[LiveWatch] Added child: ${ch.name}, type=${ch.type}, varRef=${ch.variablesReference}`);
                     }
                 }
                 const promises = [];
@@ -353,15 +380,19 @@ export class LiveVariableNode extends BaseNode {
                         const p = new Promise<void>((resolve) => {
                             child.refreshChildren(resolve);
                         });
+                        promises.push(p);
                     }
                 }
                 Promise.allSettled(promises).finally(() => {
+                    console.log(`[LiveWatch] refreshChildren completed for ${this.name}, children count=${this.children?.length || 0}`);
                     resolve();
                 });
             }, (e) => {
+                console.error('LiveWatch: Error refreshing children:', e);
                 resolve();
             });
         } else {
+            console.log(`[LiveWatch] refreshChildren: skipped for ${this.name} - expanded=${this.expanded}, varRef=${this.variablesReference}`);
             resolve();
         }
     }
@@ -369,6 +400,7 @@ export class LiveVariableNode extends BaseNode {
     public expandChildren(): Promise<void> {
         return new Promise<void>((resolve) => {
             this.expanded = true;
+            console.log(`[LiveWatch] expandChildren called for ${this.name}, variablesReference=${this.variablesReference}, session=${!!this.session}`);
             // If we still have a current session, try to get the children or
             // wait for the next timer
             this.refreshChildren(resolve);
@@ -388,15 +420,30 @@ export class LiveVariableNode extends BaseNode {
                     context: 'hover'
                 };
                 session.customRequest('liveEvaluate', arg).then((result) => {
+                    console.log(`[LiveWatch] liveEvaluate response for ${this.expr}:`, result);
                     if (result && result.result !== undefined) {
                         const oldType = this.type;
+                        const oldVarRef = this.variablesReference;
                         this.value = result.result;
                         this.type = result.type;
                         this.variablesReference = result.variablesReference ?? 0;
                         this.namedVariables = result.namedVariables ?? 0;
                         this.indexedVariables = result.indexedVariables ?? 0;
-                        if (oldType !== this.type) {
+                        console.log(
+                            `[LiveWatch] After liveEvaluate: ${this.name}, `
+                            + `varRef=${this.variablesReference}, `
+                            + `type=${this.type}, `
+                            + `value=${this.value}`
+                        );
+                        // If type changed OR variablesReference status changed, reset children
+                        if (oldType !== this.type || (oldVarRef > 0) !== (this.variablesReference > 0)) {
                             this.children = this.variablesReference ? [] : undefined;
+                            console.log(`[LiveWatch] Children reset for ${this.name}, hasVarRef=${this.variablesReference > 0}`);
+                        }
+                        // If we have variablesReference but no children array, initialize it
+                        if (this.variablesReference > 0 && !this.children) {
+                            this.children = [];
+                            console.log(`[LiveWatch] Initialized children array for ${this.name}`);
                         }
                         this.refreshChildren(resolve);
                     } else {
@@ -610,7 +657,28 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
     }
 
     public getChildren(element?: LiveVariableNode): ProviderResult<LiveVariableNode[]> {
-        return element ? element.getChildren() : this.variables.getChildren();
+        if (element) {
+            console.log(
+                `[LiveWatch] getChildren called for ${element.getName()}, `
+                + `varRef=${element.getVariablesReference()}, hasChildren=${!!element['children']}`
+            );
+            // If element has variablesReference but no children, fetch them
+            if (element.getVariablesReference() > 0 && !element['children']) {
+                console.log(`[LiveWatch] Element needs expansion, ensuring session...`);
+                // Ensure element has session before expanding
+                if (!element['session'] && LiveWatchTreeProvider.session) {
+                    console.log(`[LiveWatch] Setting session on element`);
+                    element['session'] = LiveWatchTreeProvider.session;
+                }
+                console.log(`[LiveWatch] Calling expandChildren...`);
+                return element.expandChildren().then(() => {
+                    console.log(`[LiveWatch] expandChildren done, returning children`);
+                    return element.getChildren();
+                });
+            }
+            return element.getChildren();
+        }
+        return this.variables.getChildren();
     }
 
     private startTimer(subtract: number = 0) {
