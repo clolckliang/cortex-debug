@@ -109,6 +109,8 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveUp', this.moveUpLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveDown', this.moveDownLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.setValue', this.setLiveWatchValue.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.editValue', this.editLiveWatchValue.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.startInlineEdit', this.startInlineEdit.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.expand', this.expandLiveWatchItem.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
@@ -969,7 +971,16 @@ export class CortexDebugExtension {
     }
 
     private removeLiveWatchExpr(node: any) {
-        this.liveWatchProvider.removeWatchExpr(node);
+        console.log('[LiveWatch] removeLiveWatchExpr called, node:', node.getName());
+        console.log('[LiveWatch] Debug session active:', !!vscode.debug.activeDebugSession);
+        console.log('[LiveWatch] Debug session stopped:', this.liveWatchProvider['isStopped']);
+
+        try {
+            this.liveWatchProvider.removeWatchExpr(node);
+            console.log('[LiveWatch] removeWatchExpr completed successfully');
+        } catch (error) {
+            console.error('[LiveWatch] removeWatchExpr failed:', error);
+        }
     }
 
     private editLiveWatchExpr(node: any) {
@@ -977,11 +988,23 @@ export class CortexDebugExtension {
     }
 
     private moveUpLiveWatchExpr(node: any) {
-        this.liveWatchProvider.moveUpNode(node);
+        console.log('[LiveWatch] moveUpLiveWatchExpr called, node:', node.getName());
+        try {
+            this.liveWatchProvider.moveUpNode(node);
+            console.log('[LiveWatch] moveUpLiveWatchExpr completed successfully');
+        } catch (error) {
+            console.error('[LiveWatch] moveUpLiveWatchExpr failed:', error);
+        }
     }
 
     private moveDownLiveWatchExpr(node: any) {
-        this.liveWatchProvider.moveDownNode(node);
+        console.log('[LiveWatch] moveDownLiveWatchExpr called, node:', node.getName());
+        try {
+            this.liveWatchProvider.moveDownNode(node);
+            console.log('[LiveWatch] moveDownLiveWatchExpr completed successfully');
+        } catch (error) {
+            console.error('[LiveWatch] moveDownLiveWatchExpr failed:', error);
+        }
     }
 
     private async setLiveWatchValue(node: any): Promise<void> {
@@ -1072,6 +1095,132 @@ export class CortexDebugExtension {
         }).catch((error) => {
             console.error(`[LiveWatch] Manual expand failed for ${node.getName()}:`, error);
             vscode.window.showErrorMessage(`Failed to expand '${node.getName()}': ${error}`);
+        });
+    }
+
+    private editLiveWatchValue(node: any): void {
+        if (!node || !node.setValue) {
+            vscode.window.showErrorMessage('Invalid variable node for editing');
+            return;
+        }
+
+        // Get current value for default
+        const currentValue = node.getCopyValue ? node.getCopyValue() : '';
+        const nodeType = node.getType ? node.getType() : '';
+        const nodeName = node.getName ? node.getName() : '';
+
+        console.log(`[LiveWatch] Edit value triggered for ${nodeName} (type: ${nodeType}, current: ${currentValue})`);
+
+        // Create input box with current value as default
+        vscode.window.showInputBox({
+            prompt: `Edit value for '${nodeName}'${nodeType ? ` (${nodeType})` : ''}`,
+            value: currentValue,
+            validateInput: (value: string) => {
+                if (!value || value.trim().length === 0) {
+                    return 'Value cannot be empty';
+                }
+
+                // Basic format validation (same as in setLiveWatchValue)
+                const trimmed = value.trim();
+                if (!/^-?\d+(\.\d+)?$/.test(trimmed)  // decimal
+                    && !/^0[xX][0-9a-fA-F]+$/.test(trimmed)  // hex
+                    && !/^0[bB][01]+$/.test(trimmed)  // binary
+                    && !/^["'].*["']$/.test(trimmed)  // string
+                    && !/^'.'$/.test(trimmed)  // char
+                    && trimmed !== 'true' && trimmed !== 'false'  // bool
+                    && !trimmed.includes('(')) {  // cast expression
+                    return 'Invalid format. Use decimal, hex (0x...), binary (0b...), or string ("...")';
+                }
+                return null;
+            }
+        }).then((newValue) => {
+            if (newValue !== undefined && newValue !== currentValue) {
+                console.log(`[LiveWatch] Setting new value for ${nodeName}: ${currentValue} -> ${newValue}`);
+
+                // Set the new value
+                node.setValue(newValue).then((success: boolean) => {
+                    if (success) {
+                        vscode.window.showInformationMessage(`Successfully set '${nodeName}' to '${newValue}'`);
+                        // Refresh the tree view to show the new value
+                        const session = vscode.debug.activeDebugSession;
+                        if (session) {
+                            this.liveWatchProvider.refresh(session);
+                        }
+                    } else {
+                        vscode.window.showErrorMessage(`Failed to set value for '${nodeName}'`);
+                    }
+                }).catch((error) => {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    vscode.window.showErrorMessage(`Error setting variable value: ${errorMsg}`);
+                });
+            }
+        });
+    }
+
+    private startInlineEdit(node: any): void {
+        if (!node || !node.startEdit) {
+            vscode.window.showErrorMessage('Invalid variable node for inline editing');
+            return;
+        }
+
+        const nodeName = node.getName ? node.getName() : 'Unknown';
+        console.log(`[LiveWatch] Starting inline edit for ${nodeName}`);
+
+        // Start inline edit mode
+        node.startEdit(async (newValue: string) => {
+            console.log(`[LiveWatch] Inline edit completed for ${nodeName}: ${newValue}`);
+
+            try {
+                const success = await node.setValue(newValue);
+                if (success) {
+                    vscode.window.showInformationMessage(`Successfully set '${nodeName}' to '${newValue}'`);
+                } else {
+                    vscode.window.showErrorMessage(`Failed to set value for '${nodeName}'`);
+                }
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Error setting variable value: ${errorMsg}`);
+            }
+        });
+
+        // Show quick pick for value input with inline editing feel
+        const currentValue = node.getCopyValue ? node.getCopyValue() : '';
+
+        vscode.window.showInputBox({
+            prompt: `Edit value for '${nodeName}' (Enter to confirm, Esc to cancel)`,
+            value: currentValue,
+            placeHolder: 'Enter new value...',
+            validateInput: (value: string) => {
+                // Update the edit value in real-time
+                if (node.updateEditValue) {
+                    node.updateEditValue(value);
+                }
+
+                if (value.length === 0) {
+                    return null; // Allow empty during typing
+                }
+
+                // Basic format validation
+                const trimmed = value.trim();
+                if (!/^-?\d+(\.\d+)?$/.test(trimmed)  // decimal
+                    && !/^0[xX][0-9a-fA-F]+$/.test(trimmed)  // hex
+                    && !/^0[bB][01]+$/.test(trimmed)  // binary
+                    && !/^["'].*["']$/.test(trimmed)  // string
+                    && !/^'.'$/.test(trimmed)  // char
+                    && trimmed !== 'true' && trimmed !== 'false'  // bool
+                    && !trimmed.includes('(')) {  // cast expression
+                    return 'Invalid format';
+                }
+                return null;
+            }
+        }).then((value) => {
+            if (value !== undefined) {
+                // User pressed Enter
+                node.finishEdit();
+            } else {
+                // User pressed Esc
+                node.cancelEdit();
+            }
         });
     }
 

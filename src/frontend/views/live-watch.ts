@@ -18,6 +18,9 @@ export class LiveVariableNode extends BaseNode {
     protected session: vscode.DebugSession | undefined;        // This is transient
     protected children: LiveVariableNode[] | undefined;
     protected prevValue: string = '';
+    private isEditing: boolean = false;
+    private editValue: string = '';
+    private onEditComplete?: (newValue: string) => void;
     constructor(
         parent: LiveVariableNode | undefined,
         protected name: string,
@@ -90,6 +93,26 @@ export class LiveVariableNode extends BaseNode {
         const parts = this.name.startsWith('\'') && this.isRootChild() ? this.name.split('\'::') : [this.name];
         const name = parts.pop();
 
+        // Check if node is in edit mode
+        if (this.isEditing) {
+            // For edit mode, we'll handle the display differently
+            const editLabel: vscode.TreeItemLabel = {
+                label: name + ': ' + this.editValue
+            };
+
+            const item = new TreeItem(editLabel, state);
+            item.contextValue = this.isRootChild() ? 'editing' : 'editing';
+            item.tooltip = this.type + ' (editing...)';
+
+            let file = parts.length ? parts[0].slice(1) : '';
+            if (file) {
+                const cwd = this.session?.configuration?.cwd;
+                file = cwd ? getPathRelative(cwd, file) : file;
+            }
+
+            return item;
+        }
+
         // Format value for display (especially for floating point numbers)
         let displayValue = this.formatValueForDisplay(this.value, this.type);
 
@@ -109,11 +132,11 @@ export class LiveVariableNode extends BaseNode {
         const item = new TreeItem(label, state);
         item.contextValue = this.isRootChild() ? 'expression' : 'field';
 
-        // Add click command to set value (only for leaf nodes with no children)
+        // Add click command for editable nodes (only for leaf nodes with no children)
         if (state === TreeItemCollapsibleState.None) {
             item.command = {
-                command: 'cortex-debug.liveWatch.setValue',
-                title: 'Set Value',
+                command: 'cortex-debug.liveWatch.startInlineEdit',
+                title: 'Edit Value',
                 arguments: [this]
             };
         } else if (state === TreeItemCollapsibleState.Collapsed && this.variablesReference > 0) {
@@ -143,6 +166,78 @@ export class LiveVariableNode extends BaseNode {
 
     public getCopyValue(): string {
         return this.value || this.expr;
+    }
+
+    public startEdit(callback: (newValue: string) => void): void {
+        this.isEditing = true;
+        this.editValue = this.value || this.expr || '';
+        this.onEditComplete = callback;
+        // Fire event to refresh the tree view
+        if (this.parent === undefined) {
+            // This is a root node, need to refresh from provider
+            const provider = (this as any).provider as LiveWatchTreeProvider;
+            if (provider) {
+                provider.fire();
+            }
+        }
+    }
+
+    public cancelEdit(): void {
+        this.isEditing = false;
+        this.editValue = '';
+        this.onEditComplete = undefined;
+        // Fire event to refresh the tree view
+        if (this.parent === undefined) {
+            const provider = (this as any).provider as LiveWatchTreeProvider;
+            if (provider) {
+                provider.fire();
+            }
+        }
+    }
+
+    public finishEdit(): string | null {
+        if (!this.isEditing) {
+            return null;
+        }
+
+        const newValue = this.editValue;
+        this.isEditing = false;
+        this.editValue = '';
+        const callback = this.onEditComplete;
+        this.onEditComplete = undefined;
+
+        // Fire event to refresh the tree view
+        if (this.parent === undefined) {
+            const provider = (this as any).provider as LiveWatchTreeProvider;
+            if (provider) {
+                provider.fire();
+            }
+        }
+
+        if (callback) {
+            callback(newValue);
+        }
+
+        return newValue;
+    }
+
+    public updateEditValue(newValue: string): void {
+        this.editValue = newValue;
+        // Fire event to refresh the tree view for real-time updates
+        if (this.parent === undefined) {
+            const provider = (this as any).provider as LiveWatchTreeProvider;
+            if (provider) {
+                provider.fire();
+            }
+        }
+    }
+
+    public getIsEditing(): boolean {
+        return this.isEditing;
+    }
+
+    public getEditValue(): string {
+        return this.editValue;
     }
 
     private formatValueForDisplay(value: string, type: string): string {
@@ -620,6 +715,7 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
     protected oldState = new Map <string, vscode.TreeItemCollapsibleState>();
     constructor(private context: vscode.ExtensionContext) {
         this.variables = new LiveVariableNode(undefined, '', '');
+        this.variables['provider'] = this; // Set provider reference for edit operations
         this.setRefreshRate();
         this.restoreState();
         context.subscriptions.push(
@@ -832,7 +928,9 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
     public removeWatchExpr(node: LiveVariableNode) {
         try {
             if (this.variables.removeChild(node)) {
+                // Save state immediately to ensure operation persists
                 this.saveState();
+                // Force immediate UI refresh
                 this.fire();
             }
         } catch (e) {
@@ -868,6 +966,9 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
     public moveUpNode(node: LiveVariableNode) {
         const parent = node?.getParent() as LiveVariableNode;
         if (parent && parent.moveUpChild(node)) {
+            // Save state immediately to ensure operation persists
+            this.saveState();
+            // Force immediate UI refresh
             this.fire();
         }
     }
@@ -875,6 +976,9 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
     public moveDownNode(node: LiveVariableNode) {
         const parent = node?.getParent() as LiveVariableNode;
         if (parent && parent.moveDownChild(node)) {
+            // Save state immediately to ensure operation persists
+            this.saveState();
+            // Force immediate UI refresh
             this.fire();
         }
     }
