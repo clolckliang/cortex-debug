@@ -109,6 +109,7 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveUp', this.moveUpLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveDown', this.moveDownLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.setValue', this.setLiveWatchValue.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.expand', this.expandLiveWatchItem.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
 
@@ -1050,6 +1051,28 @@ export class CortexDebugExtension {
                 vscode.window.showErrorMessage(`Error setting variable value: ${errorMsg}`);
             }
         }
+    }
+
+    private expandLiveWatchItem(node: any): void {
+        if (!node || !node.expandChildren) {
+            vscode.window.showErrorMessage('Invalid variable node for expansion');
+            return;
+        }
+
+        console.log(`[LiveWatch] Manual expand triggered for ${node.getName()}`);
+
+        // Expand the node manually
+        node.expandChildren().then(() => {
+            console.log(`[LiveWatch] Manual expand completed for ${node.getName()}`);
+            // Refresh the tree view to show the expanded children
+            const session = vscode.debug.activeDebugSession;
+            if (session) {
+                this.liveWatchProvider.fire();
+            }
+        }).catch((error) => {
+            console.error(`[LiveWatch] Manual expand failed for ${node.getName()}:`, error);
+            vscode.window.showErrorMessage(`Failed to expand '${node.getName()}': ${error}`);
+        });
     }
 
     private showWaveform(): void {

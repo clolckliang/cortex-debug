@@ -124,7 +124,8 @@ export class VariableObject {
     public isCompound(): boolean {
         return this.numchild > 0
             || this.value === '{...}'
-            || (this.dynamic && (this.displayhint === 'array' || this.displayhint === 'map'));
+            || (this.dynamic && (this.displayhint === 'array' || this.displayhint === 'map'))
+            || (this.type && (this.type.includes('struct') || this.type.includes('union') || this.type.includes('class')));
     }
 
     public toProtocolVariable(newName?: string): DebugProtocol.Variable {

@@ -54,10 +54,17 @@ Located in root `src/` directory, each supporting different debug probes:
   - Memory reading utilities and disassembly
   - GDB/MI parsing and communication
 
-- **Live Monitoring** (`src/frontend/views/`):
-  - Live watch for real-time variable monitoring
-  - Waveform visualization for time-series data
-  - Tree data structures for hierarchical display
+- **Live Monitoring** (`src/frontend/views/` and `src/live-watch-monitor.ts`):
+  - **Live Watch** (`src/frontend/views/live-watch.ts`): Real-time variable monitoring with:
+    - Structure expansion support for complex data types
+    - High-speed sampling (1-100ms intervals) for runtime variable modification
+    - Session-aware variable reference management
+    - Tree data structures for hierarchical display
+  - **Waveform Display** (`src/frontend/views/waveform-data-provider.ts`): Time-series data visualization
+  - **Live Watch Monitor** (`src/live-watch-monitor.ts`): Backend GDB session management for live operations
+    - Variable caching and high-speed sampling engine
+    - Runtime variable modification without stopping target
+    - GDB variable object lifecycle management
 
 ### Configuration
 - `src/frontend/configprovider.ts` - VS Code launch configuration provider
@@ -75,3 +82,31 @@ To debug the extension itself, use the "Extension + Debug Server" launch configu
 1. Launches a new VS Code window (debuggee)
 2. Allows you to set `debugServer: 4711` in the debuggee's launch.json
 3. Enables full debugging of both frontend and debug adapter components
+
+## Live Watch System
+The Live Watch system enables real-time variable monitoring while the target is running:
+
+### Architecture
+- **Frontend** (`src/frontend/views/live-watch.ts`): Tree view UI with session-aware variable expansion
+- **Backend** (`src/live-watch-monitor.ts`): Separate GDB session for live operations
+
+### Key Features
+- **Structure Expansion**: Complex data types (structs, unions, arrays) can be expanded to show members
+- **Runtime Variable Modification**: Change variable values without stopping the target
+- **High-Speed Sampling**: Configurable sampling rates (1-100ms) for rapid updates
+- **Session Management**: Automatic session synchronization ensures proper variable reference handling
+
+### Configuration
+Add to `launch.json`:
+```json
+{
+    "liveWatch": {
+        "enabled": true,
+        "samplesPerSecond": 4
+    }
+}
+```
+
+### Known Issues and Fixes
+- **Structure Expansion Bug**: Fixed session synchronization issues in `expandChildren()` and `refreshChildren()` methods
+- **Variable Reference Management**: Added proper session assignment to prevent expansion failures

@@ -76,21 +76,35 @@ export class LiveVariableNode extends BaseNode {
                 )
             : TreeItemCollapsibleState.None;
 
+        // Enhanced debug logging for structure expansion
+        console.log(`[LiveWatch] getTreeItem: ${this.name}, varRef=${this.variablesReference}, children=${this.children?.length || 0}, state=${state}`);
+        if (this.type && (this.type.includes('struct') || this.type.includes('union') || this.type.includes('class'))) {
+            console.log(`[LiveWatch] DEBUG: ${this.name} is a struct type, varRef=${this.variablesReference}, type=${this.type}`);
+        }
+
+        // Debug logging for floating point values
+        if (this.type && (this.type.includes('float') || this.type.includes('double'))) {
+            console.log(`[LiveWatch] DEBUG: ${this.name} is floating point type, raw value="${this.value}", type=${this.type}`);
+        }
+
         const parts = this.name.startsWith('\'') && this.isRootChild() ? this.name.split('\'::') : [this.name];
         const name = parts.pop();
 
+        // Format value for display (especially for floating point numbers)
+        let displayValue = this.formatValueForDisplay(this.value, this.type);
+
         // Check if value is changing (different from previous value)
-        const isChanging = this.prevValue && (this.prevValue !== this.value);
+        const isChanging = this.prevValue && (this.prevValue !== displayValue);
 
         const label: vscode.TreeItemLabel = {
-            label: name + ': ' + (this.value || 'not available')
+            label: name + ': ' + (displayValue || 'not available')
         };
 
         if (isChanging) {
             // Highlight the value part when it changes
             label.highlights = [[name.length + 2, label.label.length]];
         }
-        this.prevValue = this.value;
+        this.prevValue = displayValue;
 
         const item = new TreeItem(label, state);
         item.contextValue = this.isRootChild() ? 'expression' : 'field';
@@ -100,6 +114,13 @@ export class LiveVariableNode extends BaseNode {
             item.command = {
                 command: 'cortex-debug.liveWatch.setValue',
                 title: 'Set Value',
+                arguments: [this]
+            };
+        } else if (state === TreeItemCollapsibleState.Collapsed && this.variablesReference > 0) {
+            // Add expand command for structures that should be expandable
+            item.command = {
+                command: 'cortex-debug.liveWatch.expand',
+                title: 'Expand',
                 arguments: [this]
             };
         }
@@ -122,6 +143,30 @@ export class LiveVariableNode extends BaseNode {
 
     public getCopyValue(): string {
         return this.value || this.expr;
+    }
+
+    private formatValueForDisplay(value: string, type: string): string {
+        if (!value || !type) {
+            return value;
+        }
+
+        // Handle floating point numbers
+        if (type.includes('float') || type.includes('double')) {
+            // Try to parse and reformat floating point values
+            const numValue = parseFloat(value);
+            if (!isNaN(numValue)) {
+                // For floating point numbers, ensure proper decimal representation
+                if (type.includes('float')) {
+                    // Single precision float - show with appropriate precision
+                    return numValue.toPrecision(7);
+                } else if (type.includes('double')) {
+                    // Double precision - show with appropriate precision
+                    return numValue.toPrecision(15);
+                }
+            }
+        }
+
+        return value;
     }
 
     public async setValue(newValue: string): Promise<boolean> {
@@ -324,6 +369,11 @@ export class LiveVariableNode extends BaseNode {
             + `expanded=${this.expanded}, variablesReference=${this.variablesReference}`
         );
 
+        // Ensure we have the current session for this operation
+        if (!this.session && LiveWatchTreeProvider.session) {
+            this.session = LiveWatchTreeProvider.session;
+        }
+
         if (!LiveWatchTreeProvider.session || (this.session !== LiveWatchTreeProvider.session)) {
             console.log(`[LiveWatch] refreshChildren early return: session mismatch`);
             resolve();
@@ -400,6 +450,10 @@ export class LiveVariableNode extends BaseNode {
     public expandChildren(): Promise<void> {
         return new Promise<void>((resolve) => {
             this.expanded = true;
+            // Ensure we have the current session before expanding
+            if (!this.session && LiveWatchTreeProvider.session) {
+                this.session = LiveWatchTreeProvider.session;
+            }
             console.log(`[LiveWatch] expandChildren called for ${this.name}, variablesReference=${this.variablesReference}, session=${!!this.session}`);
             // If we still have a current session, try to get the children or
             // wait for the next timer
@@ -663,7 +717,7 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
                 + `varRef=${element.getVariablesReference()}, hasChildren=${!!element['children']}`
             );
             // If element has variablesReference but no children, fetch them
-            if (element.getVariablesReference() > 0 && !element['children']) {
+            if (element.getVariablesReference() > 0 && (!element['children'] || element['children'].length === 0)) {
                 console.log(`[LiveWatch] Element needs expansion, ensuring session...`);
                 // Ensure element has session before expanding
                 if (!element['session'] && LiveWatchTreeProvider.session) {
@@ -678,6 +732,10 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
             }
             return element.getChildren();
         }
+        return this.variables.getChildren();
+    }
+
+    public getRootVariables(): LiveVariableNode[] {
         return this.variables.getChildren();
     }
 

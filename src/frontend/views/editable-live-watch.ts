@@ -113,11 +113,26 @@ export class EditableLiveWatchPanel {
     }
 
     private handleToggleExpand(path: string[]) {
+        console.log(`[EditableLiveWatch] Toggle expand called for path: [${path.join(', ')}]`);
         const node = this.findNodeByPath(path);
         if (node) {
+            const oldExpanded = node.expanded;
             node.expanded = !node.expanded;
+            console.log(`[EditableLiveWatch] Node ${node.getName()} expanded: ${oldExpanded} -> ${node.expanded}`);
+
+            // Save state and refresh both views
             this.liveWatchProvider.saveState();
+
+            // Force refresh the main Live Watch tree as well
+            const session = vscode.debug.activeDebugSession;
+            if (session) {
+                this.liveWatchProvider.fire();
+            }
+
+            // Refresh this view
             this.sendUpdate();
+        } else {
+            console.log(`[EditableLiveWatch] Node not found for path: [${path.join(', ')}]`);
         }
     }
 
@@ -127,7 +142,8 @@ export class EditableLiveWatchPanel {
         }
 
         // Get root variables from live watch provider
-        const roots = this.liveWatchProvider['variables']?.getChildren() || [];
+        const roots = this.liveWatchProvider.getRootVariables() || [];
+        console.log(`[EditableLiveWatch] Available root nodes: ${roots.map(r => r.getName()).join(', ')}`);
 
         let current: LiveVariableNode | undefined;
 
@@ -135,28 +151,39 @@ export class EditableLiveWatchPanel {
         for (const root of roots) {
             if (root.getName && root.getName() === path[0]) {
                 current = root;
+                console.log(`[EditableLiveWatch] Found root node: ${path[0]} (expanded: ${current['expanded']})`);
                 break;
             }
         }
 
         if (!current) {
+            console.log(`[EditableLiveWatch] Root node not found: ${path[0]}`);
             return undefined;
         }
 
-        // Traverse path
+        // Traverse path - for each level, we need to make sure the node is expanded to access children
         for (let i = 1; i < path.length; i++) {
+            // Ensure the node is expanded to get children
+            if (!current['expanded'] && current.getVariablesReference && current.getVariablesReference() > 0) {
+                console.log(`[EditableLiveWatch] Auto-expanding ${current.getName()} to access children`);
+                current['expanded'] = true;
+            }
+
             const children = current.getChildren ? current.getChildren() : [];
+            console.log(`[EditableLiveWatch] Looking for child: ${path[i]} in ${current.getName()} (available: ${children.map(c => c.getName()).join(', ')})`);
             let found = false;
 
             for (const child of children) {
                 if (child.getName && child.getName() === path[i]) {
                     current = child;
                     found = true;
+                    console.log(`[EditableLiveWatch] Found child node: ${path[i]} (expanded: ${current['expanded']})`);
                     break;
                 }
             }
 
             if (!found) {
+                console.log(`[EditableLiveWatch] Child node not found: ${path[i]}`);
                 return undefined;
             }
         }
@@ -200,7 +227,7 @@ export class EditableLiveWatchPanel {
     }
 
     private async collectLiveWatchData(): Promise<any[]> {
-        const roots = this.liveWatchProvider['variables']?.getChildren() || [];
+        const roots = this.liveWatchProvider.getRootVariables() || [];
         const result: any[] = [];
 
         for (const root of roots) {
@@ -213,15 +240,40 @@ export class EditableLiveWatchPanel {
         return result;
     }
 
+    private formatValueForDisplay(value: string, type: string): string {
+        if (!value || !type) {
+            return value;
+        }
+
+        // Handle floating point numbers
+        if (type.includes('float') || type.includes('double')) {
+            // Try to parse and reformat floating point values
+            const numValue = parseFloat(value);
+            if (!isNaN(numValue)) {
+                // For floating point numbers, ensure proper decimal representation
+                if (type.includes('float')) {
+                    // Single precision float - show with appropriate precision
+                    return numValue.toPrecision(7);
+                } else if (type.includes('double')) {
+                    // Double precision - show with appropriate precision
+                    return numValue.toPrecision(15);
+                }
+            }
+        }
+
+        return value;
+    }
+
     private async nodeToDataItem(node: LiveVariableNode, pathPrefix: string = ''): Promise<any> {
         const name = node.getName ? node.getName() : '';
-        const value = node.getCopyValue ? node.getCopyValue() : '';
+        const rawValue = node.getCopyValue ? node.getCopyValue() : '';
         const type = node['type'] || '';
+        const value = this.formatValueForDisplay(rawValue, type);
         const children = node.getChildren ? node.getChildren() : [];
         const expanded = node['expanded'] || false;
 
         // Build full path for value tracking
-        const fullPath = pathPrefix ? `${pathPrefix}.${name}` : name;
+        const fullPath = pathPrefix ? pathPrefix + '.' + name : name;
         const previousValue = this.previousValues.get(fullPath);
         const changed = previousValue !== undefined && previousValue !== value;
 
@@ -310,36 +362,98 @@ export class EditableLiveWatchPanel {
         .indent {
             display: inline-block;
             width: 20px;
+            position: relative;
+        }
+
+        .tree-line {
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background-color: var(--vscode-panel-border);
+        }
+
+        .tree-line.horizontal {
+            width: 10px;
+            height: 1px;
+            background-color: var(--vscode-panel-border);
+            position: absolute;
+            left: 10px;
+            top: 10px;
         }
 
         .expand-icon {
             display: inline-block;
-            width: 16px;
-            height: 16px;
+            width: 18px;
+            height: 18px;
             cursor: pointer;
             user-select: none;
             text-align: center;
-            line-height: 16px;
+            line-height: 18px;
+            margin-right: 2px;
+            border-radius: 3px;
+            transition: background-color 0.15s;
+            position: relative;
+            z-index: 1;
         }
 
         .expand-icon:before {
             content: '▶';
-            font-size: 10px;
+            font-size: 12px;
             transition: transform 0.15s;
             display: inline-block;
+            color: var(--vscode-foreground);
+        }
+
+        .expand-icon:hover {
+            background-color: var(--vscode-list-hoverBackground);
         }
 
         .expand-icon.expanded:before {
             transform: rotate(90deg);
         }
 
+        .expand-icon.leaf:before {
+            content: '•';
+            font-size: 8px;
+            color: var(--vscode-descriptionForeground);
+        }
+
         .expand-icon.leaf {
-            visibility: hidden;
+            cursor: default;
+        }
+
+        .expand-icon.leaf:hover {
+            background-color: transparent;
+        }
+
+        .name-cell-content {
+            display: flex;
+            align-items: center;
+        }
+
+        .tree-level-1 {
+            background-color: rgba(0, 122, 204, 0.03);
+            border-left: 3px solid rgba(0, 122, 204, 0.2);
+        }
+        .tree-level-2 {
+            background-color: rgba(0, 122, 204, 0.02);
+            border-left: 3px solid rgba(0, 122, 204, 0.15);
+        }
+        .tree-level-3 {
+            background-color: rgba(0, 122, 204, 0.01);
+            border-left: 3px solid rgba(0, 122, 204, 0.1);
+        }
+        .tree-level-4 {
+            background-color: rgba(0, 122, 204, 0.005);
+            border-left: 3px solid rgba(0, 122, 204, 0.05);
         }
 
         .value-cell {
             cursor: text;
-            min-height: 20px;
+            min-height: 22px;
+            padding: 2px 4px;
         }
 
         .value-cell:hover {
@@ -429,10 +543,36 @@ export class EditableLiveWatchPanel {
             if (item.changed) {
                 tr.classList.add('changed');
             }
+            if (level > 0) {
+                tr.classList.add('tree-level-' + Math.min(level, 4));
+            }
 
             // Name cell
             const nameTd = document.createElement('td');
-            const indent = ''.padStart(level * 20, ' ');
+
+            const nameContent = document.createElement('div');
+            nameContent.className = 'name-cell-content';
+
+            // Create indentation with tree lines
+            for (let i = 0; i < level; i++) {
+                const indent = document.createElement('span');
+                indent.className = 'indent';
+
+                // Add vertical line for all but the last level
+                if (i < level - 1) {
+                    const vLine = document.createElement('div');
+                    vLine.className = 'tree-line';
+                    indent.appendChild(vLine);
+                } else {
+                    // Add horizontal line for the last level
+                    const hLine = document.createElement('div');
+                    hLine.className = 'tree-line horizontal';
+                    indent.appendChild(hLine);
+                }
+
+                nameContent.appendChild(indent);
+            }
+
             const expandIcon = document.createElement('span');
             expandIcon.className = 'expand-icon';
 
@@ -440,17 +580,18 @@ export class EditableLiveWatchPanel {
                 if (item.expanded) {
                     expandIcon.classList.add('expanded');
                 }
-                expandIcon.onclick = () => toggleExpand(path);
+                expandIcon.onclick = () => toggleExpand(path, item);
             } else {
                 expandIcon.classList.add('leaf');
             }
 
             const nameSpan = document.createElement('span');
             nameSpan.textContent = item.name;
+            nameSpan.style.marginLeft = '2px';
 
-            nameTd.innerHTML = indent;
-            nameTd.appendChild(expandIcon);
-            nameTd.appendChild(nameSpan);
+            nameContent.appendChild(expandIcon);
+            nameContent.appendChild(nameSpan);
+            nameTd.appendChild(nameContent);
 
             // Value cell
             const valueTd = document.createElement('td');
@@ -468,6 +609,10 @@ export class EditableLiveWatchPanel {
             tr.appendChild(typeTd);
             container.appendChild(tr);
 
+            // Store reference for tree line management
+            tr._itemPath = path;
+            tr._level = level;
+
             // Render children if expanded
             if (item.expanded && item.children) {
                 item.children.forEach(child => {
@@ -476,7 +621,8 @@ export class EditableLiveWatchPanel {
             }
         }
 
-        function toggleExpand(path) {
+        function toggleExpand(path, item) {
+            console.log('Toggle expand called for path:', path, 'item:', item);
             vscode.postMessage({
                 command: 'toggleExpand',
                 path: path

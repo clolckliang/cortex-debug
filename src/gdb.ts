@@ -1016,6 +1016,9 @@ export class GDBDebugSession extends LoggingDebugSession {
         }
         commands.push('interpreter-exec console "set stack-cache off"');
         commands.push('interpreter-exec console "set remote interrupt-on-connect off"');
+        // Ensure proper floating point display format
+        commands.push('interpreter-exec console "set print pretty on"');
+        commands.push('interpreter-exec console "set print static-members on"');
         if (this.serverController) {
             commands.push(...this.getServerConnectCommands());
         }

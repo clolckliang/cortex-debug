@@ -79,7 +79,17 @@ export class VariablesHandler {
             id = this.createVariable(varObj);
             this.variableHandlesReverse.set(varObj.name, id);
         }
-        return varObj.isCompound() ? id : 0;
+        const isCompound = varObj.isCompound();
+        const result = isCompound ? id : 0;
+
+        // Debug logging for variable reference creation
+        console.log(
+            `[LiveWatch] findOrCreateVariable ${varObj.name}: ` +
+            `numchild=${varObj.numchild}, type=${varObj.type}, ` +
+            `isCompound=${isCompound}, result=${result}`
+        );
+
+        return result;
     }
 
     private evaluateQ = new RequestQueue<DebugProtocol.EvaluateResponse, DebugProtocol.EvaluateArguments>();
