@@ -639,6 +639,12 @@
             },
             {
                 "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.selectStructMembers",
+                "title": "Select Structure Members",
+                "icon": "$(list-select)"
+            },
+            {
+                "category": "Cortex-Debug",
                 "command": "cortex-debug.waveform.addVariable",
                 "title": "Add Variable to Waveform"
             },
@@ -3507,6 +3513,11 @@
                     "command": "cortex-debug.waveform.show",
                     "when": "view == cortex-debug.waveform",
                     "group": "navigation"
+                },
+                {
+                    "command": "cortex-debug.waveform.selectStructMembers",
+                    "when": "view == cortex-debug.waveform",
+                    "group": "navigation"
                 }
             ],
             "debug/variables/context": [
@@ -3542,6 +3553,7 @@
         }
     },
     "dependencies": {
+        "@vscode/codicons": "^0.0.40",
         "@vscode/extension-telemetry": "^0.9.8",
         "@vscode/webview-ui-toolkit": "^1.4.0",
         "binary-parser": "^2.2.1",

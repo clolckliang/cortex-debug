@@ -23,6 +23,18 @@ export interface TriggerCondition {
 }
 
 /**
+ * Structure member for tree display
+ */
+export interface StructMember {
+    name: string;
+    path: string;
+    value: string;
+    type: string;
+    numericValue?: number;
+    selected?: boolean;
+}
+
+/**
  * Signal statistics for data analysis
  */
 export interface SignalStatistics {
@@ -61,6 +73,10 @@ export interface WaveformVariable {
     yOffset?: number;                 // Y-axis offset for stacked display
     height?: number;                  // Height for signal in stacked view
     statistics?: SignalStatistics;    // Calculated statistics
+
+    // Structure support
+    isStruct?: boolean;               // Whether this is a struct/union variable
+    structMembers?: StructMember[];   // Struct members for tree display
 }
 
 export interface DataSourceStats {

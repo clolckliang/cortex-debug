@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { LiveWatchTreeProvider, LiveVariableNode } from './live-watch';
 import {
     GraphPoint, GraphDataSource, WaveformVariable, DataSourceStats,
-    SignalDisplayType, TriggerCondition, SignalStatistics
+    SignalDisplayType, TriggerCondition, SignalStatistics, StructMember
 } from '../../grapher/datasource';
 import { FFTAnalyzer, FFTResult, getDataPointsForFFT } from './fft-analyzer';
 import { StructParser, ParsedStructure, MemberSelection } from './struct-parser';
@@ -114,6 +114,10 @@ export class WaveformDataProvider {
             return false;
         }
 
+        // Check if this is a struct variable by checking parsed structures
+        const parsedStruct = this.parsedStructures.get(expression);
+        const isStruct = parsedStruct && (parsedStruct.type === 'struct' || parsedStruct.type === 'union' || parsedStruct.type === 'class');
+
         const waveformVar: WaveformVariable = {
             id: expression,
             name: name,
@@ -127,7 +131,19 @@ export class WaveformDataProvider {
             trigger: {
                 enabled: false,
                 type: 'rising'
-            }
+            },
+            expression: expression,
+            isStruct: isStruct,
+            structMembers: isStruct && parsedStruct
+                ? parsedStruct.members.map((member) => ({
+                        name: member.name,
+                        path: member.path,
+                        value: member.value,
+                        type: member.type,
+                        numericValue: member.numericValue,
+                        selected: false
+                    }))
+                : undefined
         };
 
         this.variables.set(expression, waveformVar);
@@ -380,26 +396,24 @@ export class WaveformDataProvider {
                     }
                     console.log(`[Waveform] Node raw value: ${nodeValue}`);
 
-                    // Check if we have a simplified representation that needs expansion
-                    if (nodeValue === '{...}' || (nodeValue && nodeValue.includes('{...}'))) {
-                        console.log(`[Waveform] Detected simplified structure, attempting expansion`);
-                        const expandedValue = await this.expandStructure(node, expression);
-                        if (expandedValue && expandedValue !== '{...}') {
-                            console.log(`[Waveform] Successfully expanded structure: ${expandedValue}`);
-                            const parsed = this.parseStructValue(expandedValue, expression);
-                            if (parsed !== null) {
-                                console.log(`[Waveform] Parsed expanded struct value: ${parsed}`);
-                                return parsed;
-                            }
-                        }
-                    }
-
-                    // Regular parsing if not a simplified representation
-                    if (nodeValue && nodeValue !== '{...}') {
+                    // Try parsing structure value (will return null for {...} which needs expansion)
+                    if (nodeValue) {
                         const parsed = this.parseStructValue(nodeValue, expression);
                         if (parsed !== null) {
                             console.log(`[Waveform] Parsed struct value: ${parsed}`);
                             return parsed;
+                        } else if (nodeValue === '{...}') {
+                            // Parser returned null indicating expansion is needed
+                            console.log(`[Waveform] Parser indicates expansion needed for: ${expression}`);
+                            const expandedValue = await this.expandStructure(node, expression);
+                            if (expandedValue && expandedValue !== '{...}') {
+                                console.log(`[Waveform] Successfully expanded structure: ${expandedValue}`);
+                                const expandedParsed = this.parseStructValue(expandedValue, expression);
+                                if (expandedParsed !== null) {
+                                    console.log(`[Waveform] Parsed expanded struct value: ${expandedParsed}`);
+                                    return expandedParsed;
+                                }
+                            }
                         }
                     }
                 }
@@ -461,13 +475,12 @@ export class WaveformDataProvider {
 
                     if (result && result.result && result.result !== '{...}') {
                         console.log(`[Waveform] Direct evaluation successful: ${result.result}`);
-                        return result.result;
+                        return result.result as string;
                     }
                 } catch (error) {
                     console.error(`[Waveform] Direct evaluation failed:`, error);
                 }
             }
-
         } catch (error) {
             console.error(`[Waveform] Error expanding structure:`, error);
         }
@@ -493,8 +506,8 @@ export class WaveformDataProvider {
             if (node.getCopyValue && node.getCopyValue()) {
                 const copyValue = node.getCopyValue();
                 console.log(`[Waveform] Node.getCopyValue(): ${copyValue}`);
-                // Try struct parsing first for complex values
-                if (typeof copyValue === 'string' && copyValue.includes('{')) {
+                // Try struct parsing first for complex values, but avoid simplified representations
+                if (typeof copyValue === 'string' && copyValue.includes('{') && copyValue !== '{...}') {
                     const structParsed = this.parseStructValue(copyValue, expression);
                     if (structParsed !== null) {
                         return structParsed;
@@ -601,7 +614,7 @@ export class WaveformDataProvider {
                 this.memberSelections.set(expression, numericMembers);
 
                 console.log(`[Waveform] Found ${numericMembers.length} numeric members:`,
-                    numericMembers.map(m => m.path));
+                    numericMembers.map((m) => m.path));
 
                 // Return the total value for now
                 // Later we can use member selection to return specific values
@@ -611,7 +624,12 @@ export class WaveformDataProvider {
             console.error(`[Waveform] Error in advanced structure parsing:`, error);
         }
 
-        // Fallback to simple parsing if advanced parsing fails
+        // Fallback to simple parsing if advanced parsing fails, but NOT for simplified representations
+        if (structValue === '{...}' || structValue === '...') {
+            console.log(`[Waveform] Simplified structure detected in fallback - returning null for expansion: ${expression}`);
+            return null; // Let the caller handle expansion
+        }
+
         console.log(`[Waveform] Falling back to simple parsing for: ${expression}`);
         return this.parseSimpleStructValue(structValue);
     }
@@ -1085,12 +1103,12 @@ export class WaveformDataProvider {
         }
 
         // Update selection state
-        selections.forEach(selection => {
+        selections.forEach((selection) => {
             selection.selected = selectedPaths.includes(selection.path);
         });
 
         console.log(`[Waveform] Updated member selection for ${expression}:`,
-            selections.filter(s => s.selected).map(s => s.path));
+            selections.filter((s) => s.selected).map((s) => s.path));
 
         return true;
     }
@@ -1111,6 +1129,32 @@ export class WaveformDataProvider {
         }
 
         return this.structParser.generateMemberExpressions(expression, selections);
+    }
+
+    public toggleStructMemberSelection(expression: string, memberPath: string, selected: boolean): boolean {
+        const selections = this.memberSelections.get(expression);
+        if (!selections) {
+            return false;
+        }
+
+        const member = selections.find((s) => s.path === memberPath);
+        if (member) {
+            member.selected = selected;
+            return true;
+        }
+
+        return false;
+    }
+
+    public getSelectedMembers(expression: string): string[] {
+        const selections = this.memberSelections.get(expression);
+        if (!selections) {
+            return [];
+        }
+
+        return selections
+            .filter((s) => s.selected)
+            .map((s) => s.path);
     }
 
     public dispose(): void {

@@ -1254,6 +1254,12 @@ window.addEventListener('message', (event) => {
             case 'chartSettingsUpdate':
                 handleChartSettingsUpdate(message);
                 break;
+            case 'structMembersUpdate':
+                handleStructMembersUpdate(message);
+                break;
+            case 'structMemberSelectionUpdate':
+                handleStructMemberSelectionUpdate(message);
+                break;
             case 'error':
                 handleError(message);
                 break;
@@ -1834,7 +1840,11 @@ function renderVariableGroup(groupName, vars, container) {
 
 function createVariableItem(variable, isGrouped = false) {
     const item = document.createElement('div');
-    item.className = 'variable-item ' + (variable.enabled ? '' : 'disabled');
+
+    // Check if this is a struct variable
+    const isStruct = variable.isStruct || (variable.expression && variable.expression.includes('.'));
+
+    item.className = 'variable-item ' + (variable.enabled ? '' : 'disabled') + (isStruct ? ' struct' : '');
 
     if (isGrouped) {
         item.classList.add('group-item');
@@ -1942,6 +1952,22 @@ function createVariableItem(variable, isGrouped = false) {
     nameContainer.style.flex = '1';
     nameContainer.style.minWidth = '0';
 
+    // Add expand icon for struct variables
+    if (isStruct && variable.structMembers && variable.structMembers.length > 0) {
+        const expandIcon = document.createElement('i');
+        expandIcon.className = 'codicon codicon-chevron-right expand-icon';
+        expandIcon.title = 'Expand struct members';
+        expandIcon.style.cursor = 'pointer';
+
+        // Toggle expansion on click
+        expandIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleStructExpansion(variable.id, item);
+        });
+
+        nameContainer.appendChild(expandIcon);
+    }
+
     const name = document.createElement('div');
     name.className = 'variable-name';
     name.textContent = variable.name;
@@ -1955,9 +1981,10 @@ function createVariableItem(variable, isGrouped = false) {
         'bit': 'codicon-symbol-boolean',
         'state': 'codicon-symbol-enum',
         'hex': 'codicon-symbol-number',
-        'binary': 'codicon-output'
+        'binary': 'codicon-output',
+        'struct': 'codicon-symbol-class'
     };
-    typeIcon.classList.add(iconMap[displayType] || 'codicon-pulse');
+    typeIcon.classList.add(iconMap[displayType] || (isStruct ? 'codicon-symbol-class' : 'codicon-pulse'));
     typeIcon.title = displayType.charAt(0).toUpperCase() + displayType.slice(1);
 
     // Add trigger indicator if enabled
@@ -2010,6 +2037,22 @@ function createVariableItem(variable, isGrouped = false) {
 
     item.appendChild(colorIndicator);
     item.appendChild(info);
+
+    // Add struct members container if this is a struct
+    if (isStruct && variable.structMembers && variable.structMembers.length > 0) {
+        const structContainer = document.createElement('div');
+        structContainer.className = 'struct-container';
+        structContainer.id = `struct-members-${variable.id}`;
+        structContainer.style.display = 'none'; // Initially collapsed
+
+        // Create struct member items
+        variable.structMembers.forEach((member) => {
+            const memberItem = createStructMemberItem(member, variable);
+            structContainer.appendChild(memberItem);
+        });
+
+        item.appendChild(structContainer);
+    }
 
     // Add metadata row (sampling rate, data points, etc.) - but not in grouped view to save space
     if (!isGrouped && (variable.samplingRate || variable.group)) {
@@ -2089,6 +2132,106 @@ function createVariableItem(variable, isGrouped = false) {
     return item;
 }
 
+function createStructMemberItem(member, parentVariable) {
+    const item = document.createElement('div');
+    item.className = 'variable-item struct-member';
+    item.setAttribute('data-member-path', member.path);
+    item.setAttribute('data-parent-id', parentVariable.id);
+
+    // Checkbox for member selection
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'member-checkbox';
+    checkbox.checked = member.selected || false;
+    checkbox.title = 'Select this member for individual monitoring';
+
+    checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        toggleStructMemberSelection(parentVariable.id, member.path, checkbox.checked);
+    });
+
+    // Member icon
+    const memberIcon = document.createElement('i');
+    memberIcon.className = 'codicon variable-type-icon';
+
+    if (member.numericValue !== undefined) {
+        memberIcon.classList.add('codicon-symbol-number');
+        memberIcon.title = 'Numeric member';
+    } else {
+        memberIcon.classList.add('codicon-symbol-misc');
+        memberIcon.title = 'Non-numeric member';
+    }
+
+    // Member name
+    const name = document.createElement('div');
+    name.className = 'variable-name';
+    name.textContent = member.name;
+
+    // Member value
+    const value = document.createElement('div');
+    value.className = 'variable-value';
+    value.textContent = member.value || 'N/A';
+
+    // Member type
+    const type = document.createElement('div');
+    type.className = 'variable-type';
+    type.textContent = member.type || 'unknown';
+
+    item.appendChild(checkbox);
+    item.appendChild(memberIcon);
+    item.appendChild(name);
+    item.appendChild(value);
+    item.appendChild(type);
+
+    // Click to select member for monitoring
+    item.addEventListener('click', () => {
+        if (member.numericValue !== undefined) {
+            toggleStructMemberSelection(parentVariable.id, member.path, !checkbox.checked);
+            checkbox.checked = !checkbox.checked;
+        }
+    });
+
+    return item;
+}
+
+function toggleStructExpansion(variableId, item) {
+    const structContainer = document.getElementById(`struct-members-${variableId}`);
+    const expandIcon = item.querySelector('.expand-icon');
+
+    if (!structContainer) return;
+
+    const isExpanded = structContainer.style.display !== 'none';
+
+    if (isExpanded) {
+        // Collapse
+        structContainer.style.display = 'none';
+        expandIcon.classList.remove('expanded');
+        expandIcon.classList.remove('codicon-chevron-down');
+        expandIcon.classList.add('codicon-chevron-right');
+    } else {
+        // Expand
+        structContainer.style.display = 'block';
+        expandIcon.classList.add('expanded');
+        expandIcon.classList.remove('codicon-chevron-right');
+        expandIcon.classList.add('codicon-chevron-down');
+
+        // Request updated struct member data if needed
+        vscode.postMessage({
+            command: 'getStructMembers',
+            variableId: variableId
+        });
+    }
+}
+
+function toggleStructMemberSelection(parentVariableId, memberPath, selected) {
+    vscode.postMessage({
+        command: 'toggleStructMember',
+        parentVariableId: parentVariableId,
+        memberPath: memberPath,
+        selected: selected
+    });
+}
+
 function updateLegend() {
     const legend = document.getElementById('legend');
     legend.innerHTML = '';
@@ -2135,7 +2278,15 @@ function updateLegend() {
 }
 
 function drawWaveform() {
-    if (!ctx) return;
+    if (!ctx) {
+        console.error('[Waveform] drawWaveform called but ctx is null');
+        return;
+    }
+
+    // Debug: log rendering status
+    if (frameCount % 60 === 0) { // Log every 60 frames (roughly every 2 seconds)
+        console.log(`[Waveform] Drawing frame ${frameCount}, variables: ${variables.length}, recording: ${appState.isRecording}`);
+    }
 
     // Update FPS counter
     frameCount++;
@@ -2694,9 +2845,78 @@ function hideVariableTooltip() {
     }
 }
 
+function handleStructMembersUpdate(message) {
+    if (message.data && message.data.variableId && message.data.structMembers) {
+        const variable = variables.find((v) => v.id === message.data.variableId);
+        if (variable) {
+            variable.structMembers = message.data.structMembers;
+
+            // Update the struct members display
+            const structContainer = document.getElementById(`struct-members-${variable.id}`);
+            if (structContainer) {
+                structContainer.innerHTML = '';
+                message.data.structMembers.forEach((member) => {
+                    const memberItem = createStructMemberItem(member, variable);
+                    structContainer.appendChild(memberItem);
+                });
+            }
+        }
+    }
+}
+
+function handleStructMemberSelectionUpdate(message) {
+    if (message.data && message.data.variableId && message.data.selectedMembers) {
+        const variable = variables.find((v) => v.id === message.data.variableId);
+        if (variable && variable.structMembers) {
+            // Update member selection states
+            variable.structMembers.forEach((member) => {
+                member.selected = message.data.selectedMembers.includes(member.path);
+            });
+
+            // Update checkboxes
+            const structContainer = document.getElementById(`struct-members-${variable.id}`);
+            if (structContainer) {
+                const checkboxes = structContainer.querySelectorAll('.member-checkbox');
+                checkboxes.forEach((checkbox) => {
+                    const memberPath = checkbox.parentElement.getAttribute('data-member-path');
+                    checkbox.checked = message.data.selectedMembers.includes(memberPath);
+                });
+            }
+        }
+    }
+}
+
 // Update appState to track selected variable
 if (!appState.selectedVariable) {
     appState.selectedVariable = null;
+}
+
+// Initialize rendering - always start rendering to show empty canvas
+console.log('[Waveform] Initializing rendering system');
+
+// Add a simple initialization check
+function ensureWaveformInitialized() {
+    if (!canvas) {
+        console.error('[Waveform] Canvas not initialized');
+        return false;
+    }
+    if (!ctx) {
+        console.error('[Waveform] Canvas context not initialized');
+        return false;
+    }
+    console.log('[Waveform] Canvas and context initialized successfully');
+    return true;
+}
+
+// Initialize with error handling
+try {
+    initializeWaveform();
+    if (ensureWaveformInitialized()) {
+        startOptimizedRendering();
+        console.log('[Waveform] Rendering system started successfully');
+    }
+} catch (error) {
+    console.error('[Waveform] Failed to initialize waveform:', error);
 }
 
 // ==================== End UI Enhancement Functions ====================

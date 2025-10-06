@@ -31,7 +31,10 @@
       "Bash(npx vsce package --pre-release)",
       "Bash(npx vsce package --pre-release --no-dependencies)",
       "Bash(cat:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(node test-structure-parsing.js)",
+      "Bash(node test-struct-parser-simple.js)",
+      "Bash(npm install @vscode/codicons)"
     ],
     "deny": [],
     "ask": []

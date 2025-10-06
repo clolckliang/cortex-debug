@@ -33,7 +33,6 @@ export interface MemberSelection {
 }
 
 export class StructParser {
-
     /**
      * Parse a complex structure value from GDB/LiveWatch output
      */
@@ -44,10 +43,10 @@ export class StructParser {
 
         console.log(`[StructParser] Parsing structure: ${name}, value: ${structValue}`);
 
-        // Handle simplified structure representation
+        // Handle simplified structure representation - return null to indicate expansion is needed
         if (structValue === '{...}' || structValue === '...') {
-            console.log(`[StructParser] Detected simplified structure representation for ${name}`);
-            return this.createSimplifiedStructure(name, structValue);
+            console.log(`[StructParser] Detected simplified structure representation for ${name} - expansion required`);
+            return null;
         }
 
         try {
@@ -80,7 +79,6 @@ export class StructParser {
                 totalValue,
                 hash
             };
-
         } catch (error) {
             console.error(`[StructParser] Error parsing structure ${name}:`, error);
             return this.createFallbackStructure(name, structValue);
@@ -155,8 +153,8 @@ export class StructParser {
      */
     public generateMemberExpressions(structName: string, selections: MemberSelection[]): string[] {
         return selections
-            .filter(sel => sel.selected)
-            .map(sel => `${structName}.${sel.path}`);
+            .filter((sel) => sel.selected)
+            .map((sel) => `${structName}.${sel.path}`);
     }
 
     private detectStructureType(structValue: string): 'struct' | 'union' | 'class' | 'unknown' {
@@ -267,10 +265,9 @@ export class StructParser {
 
     private parseSingleMember(memberStr: string, parentName: string): StructMember | null {
         // Try different member formats
-        let match;
 
         // Format: "member = value"
-        match = memberStr.match(/^\s*([^=]+)=\s*(.+)$/);
+        const match = memberStr.match(/^\s*([^=]+)=\s*(.+)$/);
         if (match) {
             const name = match[1].trim();
             const value = match[2].trim();
@@ -309,7 +306,7 @@ export class StructParser {
     private parseNestedMembers(value: string, parentPath: string): StructMember[] | undefined {
         if (value.includes('{') && value.includes('}')) {
             const nestedStruct = this.parseStructMembers(value, parentPath);
-            return nestedStruct.map(member => ({
+            return nestedStruct.map((member) => ({
                 ...member,
                 path: `${parentPath}.${member.path}`
             }));
@@ -329,7 +326,7 @@ export class StructParser {
             const char = content[i];
 
             // Handle quotes
-            if ((char === '"' || char === "'") && !inQuotes) {
+            if ((char === '"' || char === '\'') && !inQuotes) {
                 inQuotes = true;
                 quoteChar = char;
                 current += char;
@@ -358,7 +355,7 @@ export class StructParser {
             parts.push(current.trim());
         }
 
-        return parts.filter(part => part.length > 0);
+        return parts.filter((part) => part.length > 0);
     }
 
     private inferType(value: string): string {
@@ -424,7 +421,7 @@ export class StructParser {
     }
 
     private calculateHash(members: StructMember[]): string {
-        const memberStrings = members.map(member =>
+        const memberStrings = members.map((member) =>
             `${member.name}:${member.value}:${member.type}`
         ).sort().join('|');
 

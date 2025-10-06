@@ -7,6 +7,7 @@ import { LiveWatchTreeProvider, LiveVariableNode } from './views/live-watch';
 import { EditableLiveWatchPanel } from './views/editable-live-watch';
 import { WaveformDataProvider } from './views/waveform-data-provider';
 import { WaveformWebviewPanel } from './views/waveform-webview';
+import { StructureMemberTreeDataProvider } from './views/structure-member-tree';
 import { CmBacktraceAnalyzer } from './cmbacktrace';
 import { FaultAnalysisTreeProvider } from './views/fault-analysis-tree';
 
@@ -116,6 +117,7 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.selectStructMembers', this.selectStructMembers.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.configureStructMembers', this.configureStructMembers.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.selectStructMembers', this.configureWaveformStructMembers.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.waveform.show', this.showWaveform.bind(this)),
             vscode.commands.registerCommand('cortex-debug.editableLiveWatch.show', this.showEditableLiveWatch.bind(this)),
@@ -1273,18 +1275,22 @@ export class CortexDebugExtension {
         }
 
         const expression = node.getExpr();
+        await this.selectStructMembersForExpression(expression, node.getName());
+    }
+
+    private async selectStructMembersForExpression(expression: string, name: string): Promise<void> {
         const numericMembers = this.waveformDataProvider.getNumericMembers(expression);
 
         if (numericMembers.length === 0) {
             vscode.window.showInformationMessage(
-                `No numeric members found in '${node.getName()}'. The entire structure will be monitored.`
+                `No numeric members found in '${name}'. The entire structure will be monitored.`
             );
             this.waveformWebview.show();
             return;
         }
 
         // Create quick pick items for member selection
-        const quickPickItems = numericMembers.map(member => ({
+        const quickPickItems = numericMembers.map((member) => ({
             label: member.path,
             description: `Select ${member.name} for individual monitoring`,
             picked: member.selected,
@@ -1293,19 +1299,19 @@ export class CortexDebugExtension {
 
         const selected = await vscode.window.showQuickPick(quickPickItems, {
             canPickMany: true,
-            placeHolder: `Select numeric members from ${node.getName()} to monitor individually`,
-            title: `Structure Member Selection - ${node.getName()}`
+            placeHolder: `Select numeric members from ${name} to monitor individually`,
+            title: `Structure Member Selection - ${name}`
         });
 
         if (selected) {
-            const selectedPaths = selected.map(item => item.label);
+            const selectedPaths = selected.map((item) => item.label);
             const success = this.waveformDataProvider.selectStructureMembers(expression, selectedPaths);
 
             if (success) {
                 const selectedCount = selectedPaths.length;
                 if (selectedCount > 0) {
                     vscode.window.showInformationMessage(
-                        `Selected ${selectedCount} member(s) from '${node.getName()}' for individual monitoring.`
+                        `Selected ${selectedCount} member(s) from '${name}' for individual monitoring.`
                     );
 
                     // Generate expressions for selected members
@@ -1313,7 +1319,7 @@ export class CortexDebugExtension {
                     console.log(`[Extension] Generated member expressions:`, memberExpressions);
                 } else {
                     vscode.window.showInformationMessage(
-                        `Monitoring entire structure '${node.getName()}'.`
+                        `Monitoring entire structure '${name}'.`
                     );
                 }
 
@@ -1322,17 +1328,52 @@ export class CortexDebugExtension {
         }
     }
 
-    private async configureStructMembers(node: any): Promise<void> {
+    private configureStructMembers(node: any): void {
         if (!node || !node.getExpr) {
             return;
         }
 
         const expression = node.getExpr();
+        this.configureStructMembersForExpression(expression, node.getName());
+    }
+
+    private async configureWaveformStructMembers(): Promise<void> {
+        // Get all structure variables from waveform
+        const variables = this.waveformDataProvider.getVariables();
+        const structureVariables = variables.filter((v) => {
+            const parsed = this.waveformDataProvider.getParsedStructure(v.expression);
+            return parsed !== null;
+        });
+
+        if (structureVariables.length === 0) {
+            vscode.window.showInformationMessage(
+                'No structure variables found in waveform. Add a structure variable first.'
+            );
+            return;
+        }
+
+        // Let user select which structure to configure
+        const items = structureVariables.map((v) => ({
+            label: v.name,
+            description: `Expression: ${v.expression || 'unknown'}`,
+            expression: v.expression
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select structure variable to configure members'
+        });
+
+        if (selected) {
+            this.configureStructMembersForExpression(selected.expression, selected.label);
+        }
+    }
+
+    private configureStructMembersForExpression(expression: string, name: string): void {
         const parsed = this.waveformDataProvider.getParsedStructure(expression);
 
         if (!parsed) {
             vscode.window.showWarningMessage(
-                `No parsed structure found for '${node.getName()}'. Try adding it to waveform first.`
+                `No parsed structure found for '${name}'. Try adding it to waveform first.`
             );
             return;
         }
@@ -1345,7 +1386,7 @@ export class CortexDebugExtension {
             `Total Value: ${parsed.totalValue}`,
             '',
             'Members:',
-            ...parsed.members.map(member =>
+            ...parsed.members.map((member) =>
                 `- ${member.name}: ${member.value} (${member.type})`
             )
         ];
@@ -1356,7 +1397,7 @@ export class CortexDebugExtension {
             'Close'
         ).then((choice) => {
             if (choice === 'Select Members') {
-                this.selectStructMembers(node);
+                this.selectStructMembersForExpression(expression, name);
             }
         });
     }

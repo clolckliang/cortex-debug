@@ -266,6 +266,49 @@ export class WaveformWebviewPanel {
                     }
                     break;
 
+                case 'getStructMembers':
+                    if (message.variableId) {
+                        const variable = this.dataProvider.getVariable(message.variableId);
+                        if (variable) {
+                            const parsed = this.dataProvider.getParsedStructure(variable.expression || '');
+                            if (parsed) {
+                                this.sendMessage('structMembersUpdate', {
+                                    variableId: message.variableId,
+                                    structMembers: parsed.members.map((member) => ({
+                                        name: member.name,
+                                        path: member.path,
+                                        value: member.value,
+                                        type: member.type,
+                                        numericValue: member.numericValue,
+                                        selected: false
+                                    }))
+                                });
+                            }
+                        }
+                    }
+                    break;
+
+                case 'toggleStructMember':
+                    if (message.parentVariableId && message.memberPath !== undefined) {
+                        const variable = this.dataProvider.getVariable(message.parentVariableId);
+                        if (variable) {
+                            const success = this.dataProvider.toggleStructMemberSelection(
+                                variable.expression || '',
+                                message.memberPath,
+                                message.selected
+                            );
+
+                            if (success) {
+                                const selectedMembers = this.dataProvider.getSelectedMembers(variable.expression || '');
+                                this.sendMessage('structMemberSelectionUpdate', {
+                                    variableId: message.parentVariableId,
+                                    selectedMembers: selectedMembers
+                                });
+                            }
+                        }
+                    }
+                    break;
+
                 default:
                     console.warn('Unknown command:', message.command);
             }
@@ -485,6 +528,21 @@ export class WaveformWebviewPanel {
         /* Codicon support */
         .toolbar-button .codicon {
             font-size: 16px;
+            display: block !important;
+        }
+
+        /* Fallback for missing codicons */
+        .toolbar-button .codicon::before {
+            display: block !important;
+        }
+
+        /* Ensure buttons are visible */
+        .toolbar-button {
+            border: 1px solid var(--vscode-button-border, transparent);
+        }
+
+        .toolbar-button:hover {
+            border-color: var(--vscode-button-hoverBackground);
         }
 
         .main-content {
@@ -756,6 +814,118 @@ export class WaveformWebviewPanel {
             cursor: pointer;
             user-select: none;
             transition: background-color 0.1s ease;
+        }
+
+        /* Tree structure styles for struct members */
+        .variable-item.struct {
+            font-weight: 600;
+        }
+
+        .variable-item.struct-member {
+            padding-left: 40px; /* Indent for struct members */
+            font-weight: normal;
+        }
+
+        .variable-item.struct-member.nested {
+            padding-left: 60px; /* Additional indent for nested members */
+        }
+
+        .variable-item .expand-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: transform 0.1s ease;
+        }
+
+        .variable-item .expand-icon:hover {
+            opacity: 1;
+        }
+
+        .variable-item .expand-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .variable-item .variable-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .variable-item .variable-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .variable-item .variable-value {
+            font-family: var(--vscode-editor-font-family);
+            font-size: 11px;
+            opacity: 0.8;
+            margin-left: 8px;
+        }
+
+        .variable-item .variable-type {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-left: 8px;
+            max-width: 80px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Checkbox for member selection */
+        .variable-item .member-checkbox {
+            width: 14px;
+            height: 14px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        /* Struct container */
+        .struct-container {
+            display: none;
+        }
+
+        .struct-container.expanded {
+            display: block;
+        }
+
+        /* Ensure expand icons are visible */
+        .expand-icon {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 16px !important;
+            height: 16px !important;
+            font-size: 12px !important;
+            color: var(--vscode-foreground) !important;
+        }
+
+        .expand-icon.expanded {
+            transform: rotate(90deg) !important;
+        }
+
+        /* Member checkbox styling */
+        .member-checkbox {
+            margin-right: 8px !important;
+        }
+
+        /* Variable icons */
+        .variable-icon {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            color: var(--vscode-descriptionForeground) !important;
         }
 
         .variable-item:hover {
