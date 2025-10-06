@@ -157,7 +157,7 @@ export class OpenOCDServerController extends EventEmitter implements GDBServerCo
             // but there is no other handshake mechanism
             commands.push('interpreter-exec console "monitor rtt start"');
             if (this.args.rttConfig.rtt_start_retry === undefined) {
-                this.args.rttConfig.rtt_start_retry = 1000;
+                this.args.rttConfig.rtt_start_retry = 500; // Reduced from 1000ms to 500ms for faster startup
             }
         }
         return commands;
@@ -266,7 +266,8 @@ export class OpenOCDServerController extends EventEmitter implements GDBServerCo
     }
 
     public initMatch(): RegExp {
-        return /Info\s:[^\n]*Listening on port \d+ for gdb connection/i;
+        // More permissive pattern that matches both "Info" and "Listening on port" patterns
+        return /(?:Info\s:[^\n]*Listening on port \d+|Listening on port \d+ for gdb connections?)/i;
     }
 
     public serverLaunchStarted(): void {
@@ -315,6 +316,7 @@ export class OpenOCDServerController extends EventEmitter implements GDBServerCo
     // This should not be called until the server is ready and accepting connections. Proper time to call is to have
     // established an RTT TCP port already
     private readonly rttSearchStr = 'Control block found at';
+    private rttDetectionTimeout: NodeJS.Timeout;
     public rttPoll(): void {
         OpenOCDLog('RTT Poll requested');
         if (!this.rttStarted && (this.tclSocket === undefined) && (this.args.rttConfig.rtt_start_retry > 0) && !this.rttAutoStartDetected) {
@@ -326,6 +328,20 @@ export class OpenOCDServerController extends EventEmitter implements GDBServerCo
     }
 
     private startRttMonitor() {
+        // Set a timeout to give up on RTT detection after 5 seconds to avoid hanging startup
+        if (this.args.rttConfig.rtt_start_retry > 0) {
+            this.rttDetectionTimeout = setTimeout(() => {
+                if (!this.rttStarted && !this.rttAutoStartDetected) {
+                    OpenOCDLog('RTT detection timeout - giving up to avoid startup delays');
+                    this.rttAutoStartDetected = true; // Mark as auto-detected to stop polling
+                    if (this.rttPollTimer) {
+                        clearTimeout(this.rttPollTimer);
+                        this.rttPollTimer = undefined;
+                    }
+                }
+            }, 5000); // 5 second timeout for RTT detection
+        }
+
         this.session.miDebugger.on('msg', (type, msg) => {
             if (this.rttStarted) { return; }
             msg = this.MI2Leftover + msg;
@@ -344,10 +360,18 @@ export class OpenOCDServerController extends EventEmitter implements GDBServerCo
                         clearTimeout(this.rttPollTimer);
                         this.rttPollTimer = undefined;
                     }
+                    if (this.rttDetectionTimeout) {
+                        clearTimeout(this.rttDetectionTimeout);
+                        this.rttDetectionTimeout = undefined;
+                    }
                     break;
                 } else if (/rtt:.*will retry/.test(line)) {
                     OpenOCDLog('This version of OpenOCD already know how to poll. Done');
                     this.rttAutoStartDetected = true;
+                    if (this.rttDetectionTimeout) {
+                        clearTimeout(this.rttDetectionTimeout);
+                        this.rttDetectionTimeout = undefined;
+                    }
                 }
             }
         });

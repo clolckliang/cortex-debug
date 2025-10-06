@@ -657,17 +657,24 @@ export class GDBDebugSession extends LoggingDebugSession {
                         const showTimes = this.args.showDevDebugOutput && this.args.showDevDebugTimestamps;
                         if (gdbPromiseAsyncErr)
                             throw gdbPromiseAsyncErr;
-                        await gdbPromise;
-                        if (showTimes) { this.handleMsg('log', 'Debug Time: GDB Ready...\n'); }
 
-                        // await gdbInfoVariables;
-                        // if (showTimes) { this.handleMsg('log', 'Debug Time: GDB info variables done...\n'); }
+                        // Run operations in parallel where possible to reduce startup time
+                        const serverCompletedPromise = Promise.resolve(this.serverController.serverLaunchCompleted());
+                        const parallelPromises = [
+                            gdbPromise.then(() => {
+                                if (showTimes) { this.handleMsg('log', 'Debug Time: GDB Ready...\n'); }
+                            }),
+                            serverCompletedPromise.then(() => {
+                                if (showTimes) { this.handleMsg('log', 'Debug Time: GDB Server post start events done...\n'); }
+                            }),
+                            symbolsPromise.then(() => {
+                                if (showTimes) { this.handleMsg('log', 'Debug Time: objdump and nm done...\n'); }
+                            })
+                        ];
 
-                        await this.serverController.serverLaunchCompleted();
-                        if (showTimes) { this.handleMsg('log', 'Debug Time: GDB Server post start events done...\n'); }
+                        // Wait for all parallel operations to complete
+                        await Promise.all(parallelPromises);
 
-                        await symbolsPromise;
-                        if (showTimes) { this.handleMsg('log', 'Debug Time: objdump and nm done...\n'); }
                         if (showTimes) { this.handleMsg('log', 'Debug Time: All pending items done, proceed to gdb connect...\n'); }
 
                         // if SWO launch was requested by the server controller, we wait for it to connect before starting actual debug
@@ -1810,7 +1817,7 @@ export class GDBDebugSession extends LoggingDebugSession {
             const { type, port } = (event as any).body;
             if (type === 'socket') {
                 this.swoLaunchPromise = new Promise((resolve, reject) => {
-                    const tm = 1000;
+                    const tm = 500; // Reduced from 1000ms to 500ms for faster SWO initialization
                     const timeout = setTimeout(() => {
                         this.swoLaunched = undefined;
                         resolve();

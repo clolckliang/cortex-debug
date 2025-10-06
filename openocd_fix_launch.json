@@ -1,0 +1,53 @@
+{
+    "name": "Debug with OpenOCD (Fixed)",
+    "cwd": "E:\\program_project\\test_by_vscode_stm32\\demo1",
+    "executable": "E:/program_project/test_by_vscode_stm32/demo1/build/Debug/demo1.elf",
+    "request": "launch",
+    "type": "cortex-debug",
+    "servertype": "openocd",
+    "runToEntryPoint": "main",
+    "showDevDebugOutput": "raw",
+
+    // OpenOCD配置
+    "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+    "searchDir": [
+        "C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"
+    ],
+    "configFiles": [
+        "interface/cmsis-dap.cfg",
+        "target/stm32f4x.cfg"
+    ],
+
+    // 工具链配置
+    "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+    "toolchainPrefix": "arm-none-eabi",
+
+    // SVD文件
+    "svdFile": "E:\\program_project\\test_by_vscode_stm32\\demo1/STM32F407.svd",
+
+    // Live Watch配置
+    "liveWatch": {
+        "enabled": true,
+        "samplesPerSecond": 4
+    },
+
+    // 添加预启动命令来确保稳定连接
+    "preLaunchCommands": [
+        "monitor reset halt",
+        "monitor sleep 100"
+    ],
+
+    // 增加服务器启动延迟
+    "openOCDLaunchCommands": [
+        "init",
+        "reset halt"
+    ],
+
+    // 禁用可能导致问题的功能
+    "swoConfig": {
+        "enabled": false
+    },
+    "rttConfig": {
+        "enabled": false
+    }
+}

@@ -627,6 +627,18 @@
             },
             {
                 "category": "Cortex-Debug",
+                "command": "cortex-debug.liveWatch.selectStructMembers",
+                "title": "Select Structure Members",
+                "icon": "$(list-select)"
+            },
+            {
+                "category": "Cortex-Debug",
+                "command": "cortex-debug.waveform.configureStructMembers",
+                "title": "Configure Structure Members",
+                "icon": "$(gear)"
+            },
+            {
+                "category": "Cortex-Debug",
                 "command": "cortex-debug.waveform.addVariable",
                 "title": "Add Variable to Waveform"
             },
@@ -3388,6 +3400,11 @@
                     "command": "cortex-debug.liveWatch.addToWaveform",
                     "when": "view == cortex-debug.liveWatch && viewItem == expression",
                     "group": "waveform@1"
+                },
+                {
+                    "command": "cortex-debug.liveWatch.selectStructMembers",
+                    "when": "view == cortex-debug.liveWatch && viewItem == expression",
+                    "group": "waveform@1.5"
                 },
                 {
                     "command": "cortex-debug.liveWatch.configureForWaveform",

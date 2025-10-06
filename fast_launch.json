@@ -1,0 +1,140 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32F4 Fast Launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/demo1.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+
+            // OpenOCD配置 - 优化启动
+            "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+            "searchDir": [
+                "C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/stm32f4x.cfg"
+            ],
+
+            // 基本配置
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",  // 关闭详细输出以提升速度
+            "registerUseNaturalFormat": true,
+            "variableUseNaturalFormat": true,
+
+            // 工具链
+            "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+            "toolchainPrefix": "arm-none-eabi",
+
+            // 快速启动命令 - 减少初始化步骤
+            "preLaunchCommands": [
+                "monitor reset halt"
+            ],
+
+            // 禁用所有高级功能以获得最快启动速度
+            "swoConfig": {
+                "enabled": false
+            },
+            "rttConfig": {
+                "enabled": false
+            },
+            "liveWatch": {
+                "enabled": false  // 启动时禁用，可以在运行后手动开启
+            },
+
+            // 延迟加载SVD文件
+            "svdFile": "",  // 启动时不加载，需要时再配置
+
+            // 端口配置
+            "gdbServerConsolePort": 50000,
+            "gdbPort": 3333,
+            "tclPort": 6666,
+            "telnetPort": 4444
+        },
+        {
+            "name": "STM32F4 Medium Speed",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/demo1.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+
+            // 平衡性能和功能
+            "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+            "searchDir": [
+                "C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/stm32f4x.cfg"
+            ],
+
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",
+            "svdFile": "${workspaceFolder}/STM32F407.svd",
+
+            "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+            "toolchainPrefix": "arm-none-eabi",
+
+            "preLaunchCommands": [
+                "monitor reset halt"
+            ],
+
+            // 启用部分功能但保持速度
+            "swoConfig": {
+                "enabled": false
+            },
+            "rttConfig": {
+                "enabled": false
+            },
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 1  // 最低采样率
+            }
+        },
+        {
+            "name": "STM32F4 Full Features",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/demo1.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+
+            "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+            "searchDir": [
+                "C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/stm32f4x.cfg"
+            ],
+
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "raw",
+            "svdFile": "${workspaceFolder}/STM32F407.svd",
+
+            "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+            "toolchainPrefix": "arm-none-eabi",
+
+            "preLaunchCommands": [
+                "monitor reset halt",
+                "monitor sleep 200"
+            ],
+
+            // 完整功能
+            "swoConfig": {
+                "enabled": false
+            },
+            "rttConfig": {
+                "enabled": false
+            },
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            }
+        }
+    ]
+}

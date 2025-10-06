@@ -5,6 +5,7 @@ import {
     SignalDisplayType, TriggerCondition, SignalStatistics
 } from '../../grapher/datasource';
 import { FFTAnalyzer, FFTResult, getDataPointsForFFT } from './fft-analyzer';
+import { StructParser, ParsedStructure, MemberSelection } from './struct-parser';
 
 export interface WaveformSettings {
     timeSpan: number; // seconds
@@ -25,6 +26,9 @@ export class WaveformDataProvider {
     private isRecording = false;
     private startTime = 0;
     private fftAnalyzer: FFTAnalyzer;
+    private structParser: StructParser;
+    private parsedStructures: Map<string, ParsedStructure> = new Map();
+    private memberSelections: Map<string, MemberSelection[]> = new Map();
 
     // Configuration
     private settings: WaveformSettings = {
@@ -52,6 +56,7 @@ export class WaveformDataProvider {
     constructor(private liveWatchProvider: LiveWatchTreeProvider) {
         this.dataSource = new GraphDataSource();
         this.fftAnalyzer = new FFTAnalyzer();
+        this.structParser = new StructParser();
         this.loadSettings();
         this.setupEventListeners();
     }
@@ -102,6 +107,8 @@ export class WaveformDataProvider {
         const expression = variable.getExpr();
         const name = variable.getName();
 
+        console.log(`[Waveform] Adding variable to waveform: ${name} (${expression})`);
+
         if (this.variables.has(expression)) {
             vscode.window.showWarningMessage(`Variable '${name}' is already in the waveform`);
             return false;
@@ -124,7 +131,17 @@ export class WaveformDataProvider {
         };
 
         this.variables.set(expression, waveformVar);
-        this.startDataCollection();
+        console.log(`[Waveform] Variable added, current count: ${this.variables.size}`);
+        console.log(`[Waveform] Is recording: ${this.isRecording}`);
+
+        // Start recording if not already started
+        if (!this.isRecording) {
+            console.log(`[Waveform] Starting recording...`);
+            this.startRecording();
+        } else {
+            this.startDataCollection();
+        }
+
         return true;
     }
 
@@ -184,20 +201,19 @@ export class WaveformDataProvider {
 
     public startRecording(): void {
         if (this.isRecording) {
+            console.log('[Waveform] Recording already active');
             return;
         }
 
-        // Check if auto-start is enabled in settings
-        const config = vscode.workspace.getConfiguration('cortex-debug');
-        const autoStart = config.get('waveformAutoStart', true);
+        console.log('[Waveform] Starting recording...');
 
-        if (!autoStart) {
-            console.log('Waveform auto-start is disabled in settings');
-            return;
-        }
+        // For manual addition (from addToWaveform), we ignore the auto-start setting
+        // and always start recording when variables are added
 
         this.isRecording = true;
         this.startTime = Date.now();
+        console.log(`[Waveform] Recording started at: ${this.startTime}`);
+
         this.startDataCollection();
     }
 
@@ -207,14 +223,36 @@ export class WaveformDataProvider {
     }
 
     private startDataCollection(): void {
-        if (this.refreshTimer || this.variables.size === 0 || !this.isRecording) {
+        console.log(`[Waveform] startDataCollection called:`);
+        console.log(`[Waveform] - Timer exists: ${!!this.refreshTimer}`);
+        console.log(`[Waveform] - Variables count: ${this.variables.size}`);
+        console.log(`[Waveform] - Is recording: ${this.isRecording}`);
+        console.log(`[Waveform] - Refresh rate: ${this.settings.refreshRate} Hz`);
+
+        if (this.refreshTimer) {
+            console.log('[Waveform] Data collection already running');
             return;
         }
 
+        if (this.variables.size === 0) {
+            console.log('[Waveform] No variables to collect');
+            return;
+        }
+
+        if (!this.isRecording) {
+            console.log('[Waveform] Not recording, starting collection anyway (manual override)');
+            // Allow collection even if not officially "recording" when manually added
+        }
+
         const intervalMs = 1000 / this.settings.refreshRate;
+        console.log(`[Waveform] Starting data collection with interval: ${intervalMs}ms`);
+
         this.refreshTimer = setInterval(() => {
             this.collectData();
         }, intervalMs);
+
+        // Also collect data immediately
+        this.collectData();
     }
 
     private stopDataCollection(): void {
@@ -233,11 +271,13 @@ export class WaveformDataProvider {
 
     private async collectData(): Promise<void> {
         if (!this.isRecording || this.variables.size === 0) {
+            console.log(`[Waveform] collectData skipped: recording=${this.isRecording}, variables=${this.variables.size}`);
             return;
         }
 
         const session = vscode.debug.activeDebugSession;
         if (!session || session.type !== 'cortex-debug') {
+            console.log(`[Waveform] collectData skipped: no active debug session or wrong type`);
             return;
         }
 
@@ -267,18 +307,23 @@ export class WaveformDataProvider {
     private async evaluateVariable(expression: string, variable: WaveformVariable, currentTime: number): Promise<void> {
         const session = vscode.debug.activeDebugSession;
         if (!session) {
+            console.log(`[Waveform] No active debug session for expression: ${expression}`);
             return;
         }
 
         try {
+            console.log(`[Waveform] Evaluating expression: ${expression}`);
+
             // Try to get value from Live Watch first
             const liveWatchValue = await this.getLiveWatchValue(expression);
             let value: number | null = null;
 
             if (liveWatchValue !== null) {
                 value = liveWatchValue;
+                console.log(`[Waveform] Got value from Live Watch for ${expression}: ${value}`);
             } else {
                 // Fallback to direct evaluation
+                console.log(`[Waveform] Using direct evaluation for: ${expression}`);
                 const result = await session.customRequest('evaluate', {
                     expression: expression,
                     context: 'watch'
@@ -286,11 +331,15 @@ export class WaveformDataProvider {
 
                 if (result && result.result !== undefined) {
                     value = this.parseValue(result.result);
+                    console.log(`[Waveform] Direct evaluation result for ${expression}: ${result.result} -> ${value}`);
+                } else {
+                    console.log(`[Waveform] No result from direct evaluation for: ${expression}`);
                 }
             }
 
             if (value !== null) {
                 variable.lastValue = value;
+                console.log(`[Waveform] Adding data point for ${expression}: ${value} at ${currentTime}`);
 
                 // Create a graph point and add to data source
                 this.dataSource.receiveDataMessage({
@@ -299,30 +348,169 @@ export class WaveformDataProvider {
                     type: 'data',
                     data: value
                 });
+            } else {
+                console.log(`[Waveform] Could not parse value for expression: ${expression}`);
             }
         } catch (error) {
-            console.error(`Failed to evaluate expression '${expression}':`, error instanceof Error ? error.message : String(error));
+            console.error(`[Waveform] Failed to evaluate expression '${expression}':`, error instanceof Error ? error.message : String(error));
         }
     }
 
-    private getLiveWatchValue(expression: string): Promise<number | null> {
-        // For now, simplify this by using direct evaluation
-        // Live Watch integration would require more complex async handling
-        // that's better implemented with proper VSCode TreeDataProvider integration
+    private async getLiveWatchValue(expression: string): Promise<number | null> {
+        // Try to get value from Live Watch tree provider
+        try {
+            console.log(`[Waveform] Searching for expression in Live Watch: ${expression}`);
+            const rootVariables = this.liveWatchProvider.getRootVariables();
+            console.log(`[Waveform] Found ${rootVariables.length} variables in Live Watch`);
+
+            for (const node of rootVariables) {
+                console.log(`[Waveform] Checking node: ${node.getName()} (${node.getExpr()})`);
+                if (node.getExpr() === expression) {
+                    console.log(`[Waveform] Found matching node for: ${expression}`);
+                    const value = this.extractNodeValue(node, expression);
+                    if (value !== null) {
+                        console.log(`[Waveform] Extracted value from node: ${value}`);
+                        return value;
+                    }
+
+                    // Try to get more detailed value from the node
+                    let nodeValue = null;
+                    if (node.getCopyValue) {
+                        nodeValue = node.getCopyValue();
+                    }
+                    console.log(`[Waveform] Node raw value: ${nodeValue}`);
+
+                    // Check if we have a simplified representation that needs expansion
+                    if (nodeValue === '{...}' || (nodeValue && nodeValue.includes('{...}'))) {
+                        console.log(`[Waveform] Detected simplified structure, attempting expansion`);
+                        const expandedValue = await this.expandStructure(node, expression);
+                        if (expandedValue && expandedValue !== '{...}') {
+                            console.log(`[Waveform] Successfully expanded structure: ${expandedValue}`);
+                            const parsed = this.parseStructValue(expandedValue, expression);
+                            if (parsed !== null) {
+                                console.log(`[Waveform] Parsed expanded struct value: ${parsed}`);
+                                return parsed;
+                            }
+                        }
+                    }
+
+                    // Regular parsing if not a simplified representation
+                    if (nodeValue && nodeValue !== '{...}') {
+                        const parsed = this.parseStructValue(nodeValue, expression);
+                        if (parsed !== null) {
+                            console.log(`[Waveform] Parsed struct value: ${parsed}`);
+                            return parsed;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error getting value from Live Watch:', error);
+        }
+
+        console.log(`[Waveform] Expression not found in Live Watch, using direct evaluation: ${expression}`);
+        // Fallback to direct evaluation
         return this.evaluateDirectly(expression);
     }
 
-    private extractNodeValue(node: any): number | null {
+    private async expandStructure(node: any, expression: string): Promise<string | null> {
         try {
+            console.log(`[Waveform] Expanding structure for: ${expression}`);
+
+            // Try to get children from the node
+            if (node.getChildren && typeof node.getChildren === 'function') {
+                // Force expand the node to get children
+                const session = vscode.debug.activeDebugSession;
+                if (session && node.getVariablesReference && node.getVariablesReference() > 0) {
+                    console.log(`[Waveform] Requesting children for expansion, varRef: ${node.getVariablesReference()}`);
+
+                    try {
+                        const result = await session.customRequest('liveVariables', {
+                            variablesReference: node.getVariablesReference()
+                        });
+
+                        if (result && result.variables && result.variables.length > 0) {
+                            console.log(`[Waveform] Got ${result.variables.length} children for expansion`);
+
+                            // Build expanded structure representation
+                            const members = result.variables.map((variable: any) => {
+                                const value = variable.result || variable.value || 'undefined';
+                                return `${variable.name} = ${value}`;
+                            });
+
+                            const expandedStructure = `{${members.join(', ')}}`;
+                            console.log(`[Waveform] Built expanded structure: ${expandedStructure}`);
+
+                            return expandedStructure;
+                        }
+                    } catch (error) {
+                        console.error(`[Waveform] Error requesting children:`, error);
+                    }
+                }
+            }
+
+            // Alternative: Try direct evaluation with member access
+            const session = vscode.debug.activeDebugSession;
+            if (session) {
+                console.log(`[Waveform] Trying direct evaluation for structure expansion`);
+                try {
+                    const result = await session.customRequest('evaluate', {
+                        expression: expression,
+                        context: 'watch'
+                    });
+
+                    if (result && result.result && result.result !== '{...}') {
+                        console.log(`[Waveform] Direct evaluation successful: ${result.result}`);
+                        return result.result;
+                    }
+                } catch (error) {
+                    console.error(`[Waveform] Direct evaluation failed:`, error);
+                }
+            }
+
+        } catch (error) {
+            console.error(`[Waveform] Error expanding structure:`, error);
+        }
+
+        return null;
+    }
+
+    private extractNodeValue(node: any, expression: string): number | null {
+        try {
+            console.log(`[Waveform] Extracting value from node: ${node.getName()}`);
+
             // Try different methods to extract the value
             if (node.getValue) {
                 const rawValue = node.getValue();
-                return this.parseValue(rawValue.toString());
-            } else if (node.value !== undefined) {
-                return this.parseValue(node.value.toString());
-            } else if (node.lastValue !== undefined) {
-                return this.parseValue(node.lastValue.toString());
+                console.log(`[Waveform] Node getValue(): ${rawValue}`);
+                const parsed = this.parseValue(rawValue.toString());
+                if (parsed !== null) {
+                    return parsed;
+                }
             }
+
+            // Use public getter method to access the value
+            if (node.getCopyValue && node.getCopyValue()) {
+                const copyValue = node.getCopyValue();
+                console.log(`[Waveform] Node.getCopyValue(): ${copyValue}`);
+                // Try struct parsing first for complex values
+                if (typeof copyValue === 'string' && copyValue.includes('{')) {
+                    const structParsed = this.parseStructValue(copyValue, expression);
+                    if (structParsed !== null) {
+                        return structParsed;
+                    }
+                }
+                const parsed = this.parseValue(copyValue);
+                if (parsed !== null) {
+                    return parsed;
+                }
+            }
+
+            // For protected properties, we need to rely on public methods only
+            // The getCopyValue method should provide the current value
+            // If that doesn't work, we'll need to refresh the node data
+
+            console.log(`[Waveform] Could not extract numeric value from node: ${node.getName()}`);
         } catch (error) {
             console.error('Error extracting node value:', error);
         }
@@ -384,6 +572,76 @@ export class WaveformDataProvider {
         }
 
         return null;
+    }
+
+    private parseStructValue(structValue: string, expression: string): number | null {
+        if (!structValue || structValue === 'not available') {
+            return null;
+        }
+
+        console.log(`[Waveform] Parsing structure with advanced parser: ${expression}`);
+
+        try {
+            // Use the new advanced structure parser
+            const parsed = this.structParser.parseStructure(structValue, expression);
+
+            if (parsed) {
+                console.log(`[Waveform] Structure parsed successfully:`, {
+                    type: parsed.type,
+                    membersCount: parsed.members.length,
+                    totalValue: parsed.totalValue,
+                    hash: parsed.hash
+                });
+
+                // Store the parsed structure for later use
+                this.parsedStructures.set(expression, parsed);
+
+                // Get available numeric members
+                const numericMembers = this.structParser.getNumericMembers(parsed);
+                this.memberSelections.set(expression, numericMembers);
+
+                console.log(`[Waveform] Found ${numericMembers.length} numeric members:`,
+                    numericMembers.map(m => m.path));
+
+                // Return the total value for now
+                // Later we can use member selection to return specific values
+                return parsed.totalValue;
+            }
+        } catch (error) {
+            console.error(`[Waveform] Error in advanced structure parsing:`, error);
+        }
+
+        // Fallback to simple parsing if advanced parsing fails
+        console.log(`[Waveform] Falling back to simple parsing for: ${expression}`);
+        return this.parseSimpleStructValue(structValue);
+    }
+
+    private parseSimpleStructValue(structValue: string): number | null {
+        // Handle struct values like "{a: 1, b: 2}"
+        if (structValue.startsWith('{') && structValue.endsWith('}')) {
+            // Try to extract numeric values from struct representation
+            const numbers = structValue.match(/\d+\.?\d*/g);
+            if (numbers && numbers.length > 0) {
+                // For structs, we can calculate a hash or sum of values
+                const sum = numbers.reduce((acc, num) => acc + parseFloat(num), 0);
+                return sum;
+            }
+        }
+
+        // Handle enum or named constant values
+        if (structValue.includes('{') || structValue.includes('...')) {
+            // For complex struct representations, create a hash
+            let hash = 0;
+            for (let i = 0; i < structValue.length; i++) {
+                const char = structValue.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; // Convert to 32-bit integer
+            }
+            return Math.abs(hash) % 1000000; // Keep it reasonable
+        }
+
+        // Fallback to regular parsing
+        return this.parseValue(structValue);
     }
 
     private getGraphId(expression: string): number {
@@ -810,9 +1068,56 @@ export class WaveformDataProvider {
         ];
     }
 
+    // Enhanced structure member selection methods
+
+    public getParsedStructure(expression: string): ParsedStructure | null {
+        return this.parsedStructures.get(expression) || null;
+    }
+
+    public getNumericMembers(expression: string): MemberSelection[] {
+        return this.memberSelections.get(expression) || [];
+    }
+
+    public selectStructureMembers(expression: string, selectedPaths: string[]): boolean {
+        const selections = this.memberSelections.get(expression);
+        if (!selections) {
+            return false;
+        }
+
+        // Update selection state
+        selections.forEach(selection => {
+            selection.selected = selectedPaths.includes(selection.path);
+        });
+
+        console.log(`[Waveform] Updated member selection for ${expression}:`,
+            selections.filter(s => s.selected).map(s => s.path));
+
+        return true;
+    }
+
+    public getSelectedMemberValue(expression: string, memberPath: string): number | null {
+        const parsed = this.parsedStructures.get(expression);
+        if (!parsed) {
+            return null;
+        }
+
+        return this.structParser.extractMemberValue(parsed, memberPath);
+    }
+
+    public generateMemberExpressions(expression: string): string[] {
+        const selections = this.memberSelections.get(expression);
+        if (!selections) {
+            return [];
+        }
+
+        return this.structParser.generateMemberExpressions(expression, selections);
+    }
+
     public dispose(): void {
         this.stopDataCollection();
         this.variables.clear();
         this.dataSource.clearData();
+        this.parsedStructures.clear();
+        this.memberSelections.clear();
     }
 }

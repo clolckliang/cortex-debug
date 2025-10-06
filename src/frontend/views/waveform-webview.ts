@@ -96,22 +96,31 @@ export class WaveformWebviewPanel {
         const variables = this.dataProvider.getVariables();
         const allData = new Map<string, GraphPoint[]>();
 
+        console.log(`[Waveform Webview] Sending data update: ${variables.length} variables`);
+
         for (const variable of variables) {
             if (variable.enabled) {
                 const data = this.dataProvider.getData(variable.id);
                 allData.set(variable.id, data);
+                console.log(`[Waveform Webview] Variable ${variable.name}: ${data.length} data points, last value: ${variable.lastValue}`);
+            } else {
+                console.log(`[Waveform Webview] Variable ${variable.name} is disabled`);
             }
         }
 
         const latestPoints = this.dataProvider.getLatestDataPoints();
 
-        this.webviewPanel.webview.postMessage({
+        const message = {
             type: 'dataUpdate',
             variables: variables,
             data: Object.fromEntries(allData),
             latestPoints: Object.fromEntries(latestPoints),
             settings: this.dataProvider.getSettings()
-        });
+        };
+
+        console.log(`[Waveform Webview] Sending message with ${Object.keys(message.data).length} data keys`);
+
+        this.webviewPanel.webview.postMessage(message);
     }
 
     private handleMessage(message: any): void {

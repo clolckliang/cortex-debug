@@ -84,9 +84,9 @@ export class VariablesHandler {
 
         // Debug logging for variable reference creation
         console.log(
-            `[LiveWatch] findOrCreateVariable ${varObj.name}: ` +
-            `numchild=${varObj.numchild}, type=${varObj.type}, ` +
-            `isCompound=${isCompound}, result=${result}`
+            `[LiveWatch] findOrCreateVariable ${varObj.name}: `
+            + `numchild=${varObj.numchild}, type=${varObj.type}, `
+            + `isCompound=${isCompound}, result=${result}`
         );
 
         return result;

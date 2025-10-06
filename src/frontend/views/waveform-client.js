@@ -1269,6 +1269,12 @@ window.addEventListener('message', (event) => {
 function handleDataUpdate(message) {
     if (!message.data) return;
 
+    console.log('[Waveform Client] Received data update:', {
+        variables: message.variables?.length || 0,
+        dataKeys: Object.keys(message.data || {}),
+        settings: message.settings
+    });
+
     const now = Date.now();
     const timeSinceLastUpdate = now - appState.lastUpdateTime;
 

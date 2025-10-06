@@ -143,7 +143,7 @@ export class EditableLiveWatchPanel {
 
         // Get root variables from live watch provider
         const roots = this.liveWatchProvider.getRootVariables() || [];
-        console.log(`[EditableLiveWatch] Available root nodes: ${roots.map(r => r.getName()).join(', ')}`);
+        console.log(`[EditableLiveWatch] Available root nodes: ${roots.map((r) => r.getName()).join(', ')}`);
 
         let current: LiveVariableNode | undefined;
 
@@ -170,7 +170,8 @@ export class EditableLiveWatchPanel {
             }
 
             const children = current.getChildren ? current.getChildren() : [];
-            console.log(`[EditableLiveWatch] Looking for child: ${path[i]} in ${current.getName()} (available: ${children.map(c => c.getName()).join(', ')})`);
+            console.log(`[EditableLiveWatch] Looking for child: ${path[i]} in ${current.getName()}`
+                + ` (available: ${children.map((c) => c.getName()).join(', ')})`);
             let found = false;
 
             for (const child of children) {

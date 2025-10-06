@@ -1,0 +1,98 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32F4 OpenOCD Debug",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/demo1.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+
+            // OpenOCD配置
+            "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+            "searchDir": [
+                "C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/stm32f4x.cfg"
+            ],
+
+            // 基本配置
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",  // 减少输出噪音
+            "svdFile": "${workspaceFolder}/STM32F407.svd",
+
+            // 工具链
+            "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+            "toolchainPrefix": "arm-none-eabi",
+
+            // 稳定性增强配置
+            "preLaunchCommands": [
+                "monitor reset halt",
+                "monitor sleep 200"
+            ],
+
+            "postLaunchCommands": [
+                "monitor reset init"
+            ],
+
+            // 禁用可能导致问题的功能
+            "swoConfig": {
+                "enabled": false
+            },
+            "rttConfig": {
+                "enabled": false
+            },
+
+            // Live Watch配置
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 2  // 降低采样率以增加稳定性
+            },
+
+            // 服务器配置优化
+            "gdbServerConsolePort": 50000,
+            "gdbPort": 3333,
+            "tclPort": 6666,
+            "telnetPort": 4444
+        },
+        {
+            "name": "STM32F4 OpenOCD Debug (Minimal)",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/demo1.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+
+            // 最简配置，最大兼容性
+            "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+            "searchDir": [
+                "C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/stm32f4x.cfg"
+            ],
+
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",
+            "svdFile": "${workspaceFolder}/STM32F407.svd",
+
+            "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+            "toolchainPrefix": "arm-none-eabi",
+
+            // 禁用所有高级功能以避免问题
+            "swoConfig": {
+                "enabled": false
+            },
+            "rttConfig": {
+                "enabled": false
+            },
+            "liveWatch": {
+                "enabled": false
+            }
+        }
+    ]
+}

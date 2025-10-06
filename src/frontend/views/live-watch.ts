@@ -114,7 +114,7 @@ export class LiveVariableNode extends BaseNode {
         }
 
         // Format value for display (especially for floating point numbers)
-        let displayValue = this.formatValueForDisplay(this.value, this.type);
+        const displayValue = this.formatValueForDisplay(this.value, this.type);
 
         // Check if value is changing (different from previous value)
         const isChanging = this.prevValue && (this.prevValue !== displayValue);

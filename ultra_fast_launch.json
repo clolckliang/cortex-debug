@@ -1,0 +1,55 @@
+{
+    "name": "STM32F4 Ultra Fast",
+    "cwd": "E:\\program_project\\test_by_vscode_stm32\\demo1",
+    "executable": "E:/program_project/test_by_vscode_stm32/demo1/build/Debug/demo1.elf",
+    "request": "launch",
+    "type": "cortex-debug",
+    "servertype": "openocd",
+
+    // 最小OpenOCD配置
+    "serverpath": "D:\\Dev_env\\OpenOCD\\bin\\openocd.exe",
+    "searchDir": ["C:/OpenOCD-x86_64-0.12.0/share/openocd/scripts"],
+    "configFiles": [
+        "interface/cmsis-dap.cfg",
+        "target/stm32f4x.cfg"
+    ],
+
+    // 极简启动配置
+    "runToEntryPoint": "main",
+    "showDevDebugOutput": "none",
+    "preLaunchCommands": [],  // 无预启动命令
+    "postLaunchCommands": [],  // 无后启动命令
+
+    // 工具链
+    "toolchainPath": "D:\\Dev_env\\arm_gcc\\arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi\\bin",
+    "toolchainPrefix": "arm-none-eabi",
+
+    // 完全禁用高级功能
+    "swoConfig": {
+        "enabled": false
+    },
+    "rttConfig": {
+        "enabled": false
+    },
+    "liveWatch": {
+        "enabled": false
+    },
+
+    // 延迟加载SVD
+    "svdFile": "",
+
+    // 直接端口配置，避免端口扫描
+    "gdbPort": 3333,
+    "tclPort": 6666,
+    "telnetPort": 4444,
+
+    // 优化的GDB设置
+    "overrideGDBServerStartedRegex": "Info.*Listening on port",
+    "overrideAttachCommands": [
+        "monitor halt"
+    ],
+    "overrideLaunchCommands": [
+        "monitor reset halt",
+        "monitor sleep 50"
+    ]
+}

@@ -114,6 +114,8 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.expand', this.expandLiveWatchItem.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.selectStructMembers', this.selectStructMembers.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.waveform.configureStructMembers', this.configureStructMembers.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.waveform.show', this.showWaveform.bind(this)),
             vscode.commands.registerCommand('cortex-debug.editableLiveWatch.show', this.showEditableLiveWatch.bind(this)),
@@ -1239,11 +1241,124 @@ export class CortexDebugExtension {
         if (node && node.getExpr) {
             const success = this.waveformDataProvider.addVariable(node);
             if (success) {
-                vscode.window.showInformationMessage(`Added '${node.getName()}' to waveform monitoring`);
-                // Auto-show waveform view when first variable is added
+                const expression = node.getExpr();
+                const parsed = this.waveformDataProvider.getParsedStructure(expression);
+
+                if (parsed && (parsed.type === 'struct' || parsed.type === 'union')) {
+                    // This is a complex structure, offer member selection
+                    vscode.window.showInformationMessage(
+                        `Added '${node.getName()}' to waveform. This appears to be a ${parsed.type}.`,
+                        'Select Members',
+                        'Continue'
+                    ).then((choice) => {
+                        if (choice === 'Select Members') {
+                            this.selectStructMembers(node);
+                        } else {
+                            // Auto-show waveform view when first variable is added
+                            this.waveformWebview.show();
+                        }
+                    });
+                } else {
+                    vscode.window.showInformationMessage(`Added '${node.getName()}' to waveform monitoring`);
+                    // Auto-show waveform view when first variable is added
+                    this.waveformWebview.show();
+                }
+            }
+        }
+    }
+
+    private async selectStructMembers(node: any): Promise<void> {
+        if (!node || !node.getExpr) {
+            return;
+        }
+
+        const expression = node.getExpr();
+        const numericMembers = this.waveformDataProvider.getNumericMembers(expression);
+
+        if (numericMembers.length === 0) {
+            vscode.window.showInformationMessage(
+                `No numeric members found in '${node.getName()}'. The entire structure will be monitored.`
+            );
+            this.waveformWebview.show();
+            return;
+        }
+
+        // Create quick pick items for member selection
+        const quickPickItems = numericMembers.map(member => ({
+            label: member.path,
+            description: `Select ${member.name} for individual monitoring`,
+            picked: member.selected,
+            detail: `Path: ${member.path}`
+        }));
+
+        const selected = await vscode.window.showQuickPick(quickPickItems, {
+            canPickMany: true,
+            placeHolder: `Select numeric members from ${node.getName()} to monitor individually`,
+            title: `Structure Member Selection - ${node.getName()}`
+        });
+
+        if (selected) {
+            const selectedPaths = selected.map(item => item.label);
+            const success = this.waveformDataProvider.selectStructureMembers(expression, selectedPaths);
+
+            if (success) {
+                const selectedCount = selectedPaths.length;
+                if (selectedCount > 0) {
+                    vscode.window.showInformationMessage(
+                        `Selected ${selectedCount} member(s) from '${node.getName()}' for individual monitoring.`
+                    );
+
+                    // Generate expressions for selected members
+                    const memberExpressions = this.waveformDataProvider.generateMemberExpressions(expression);
+                    console.log(`[Extension] Generated member expressions:`, memberExpressions);
+                } else {
+                    vscode.window.showInformationMessage(
+                        `Monitoring entire structure '${node.getName()}'.`
+                    );
+                }
+
                 this.waveformWebview.show();
             }
         }
+    }
+
+    private async configureStructMembers(node: any): Promise<void> {
+        if (!node || !node.getExpr) {
+            return;
+        }
+
+        const expression = node.getExpr();
+        const parsed = this.waveformDataProvider.getParsedStructure(expression);
+
+        if (!parsed) {
+            vscode.window.showWarningMessage(
+                `No parsed structure found for '${node.getName()}'. Try adding it to waveform first.`
+            );
+            return;
+        }
+
+        // Show detailed structure information
+        const infoItems = [
+            `Structure Type: ${parsed.type}`,
+            `Total Members: ${parsed.members.length}`,
+            `Current Hash: ${parsed.hash}`,
+            `Total Value: ${parsed.totalValue}`,
+            '',
+            'Members:',
+            ...parsed.members.map(member =>
+                `- ${member.name}: ${member.value} (${member.type})`
+            )
+        ];
+
+        vscode.window.showInformationMessage(
+            infoItems.join('\n'),
+            'Select Members',
+            'Close'
+        ).then((choice) => {
+            if (choice === 'Select Members') {
+                this.selectStructMembers(node);
+            }
+        });
     }
 
     private async addWaveformVariable(): Promise<void> {
