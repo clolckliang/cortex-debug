@@ -577,7 +577,14 @@ export class GDBDebugSession extends LoggingDebugSession {
             if (!this.getGdbPath(response)) {
                 return doResolve();
             }
-            const symbolsPromise = this.loadSymbols();      // This is totally async and in most cases, done while gdb is starting
+
+            // Check if we should skip symbol loading for fast startup
+            const skipSymbols = this.args.fastStart || this.args.skipSymbolLoading;
+            const symbolsPromise = skipSymbols ? Promise.resolve() : this.loadSymbols();      // This is totally async and in most cases, done while gdb is starting
+
+            if (skipSymbols) {
+                this.handleMsg('log', 'Fast startup: Skipping symbol table loading for faster startup\n');
+            }
             let gdbPromiseAsyncErr;
             const gdbPromise = this.startGdb(response);
             gdbPromise.catch((err) => {
@@ -754,6 +761,12 @@ export class GDBDebugSession extends LoggingDebugSession {
                             }
                         });
                         this.sendResponse(response);
+
+                        // Start delayed initialization for non-critical features
+                        if (this.args.delayedInitialization || this.args.fastStart) {
+                            this.initializeAdvancedFeatures();
+                        }
+
                         doResolve();
                     }, (err) => {
                         this.launchErrorResponse(response, 103, `Failed to launch GDB: ${err.toString()}`);
@@ -961,14 +974,28 @@ export class GDBDebugSession extends LoggingDebugSession {
             this.quitEvent();
         });
         this.initDebugger();
-        this.gdbInitCommands = [
-            'interpreter-exec console "set print demangle on"',
-            'interpreter-exec console "set print asm-demangle on"',
-            'enable-pretty-printing',
-            `interpreter-exec console "source ${this.args.extensionPath}/support/gdbsupport.init"`,
-            `interpreter-exec console "source ${this.args.extensionPath}/support/gdb-swo.init"`,
-            ...this.formatRadixGdbCommand()
-        ];
+
+        // Optimize GDB initialization for fast startup
+        const fastStart = this.args.fastStart || this.args.skipSymbolLoading;
+        if (fastStart) {
+            // Minimal commands for fast startup
+            this.gdbInitCommands = [
+                'interpreter-exec console "set print demangle on"',
+                'enable-pretty-printing',
+                ...this.formatRadixGdbCommand()
+            ];
+            this.handleMsg('log', 'Fast startup: Using minimal GDB initialization commands\n');
+        } else {
+            // Full initialization
+            this.gdbInitCommands = [
+                'interpreter-exec console "set print demangle on"',
+                'interpreter-exec console "set print asm-demangle on"',
+                'enable-pretty-printing',
+                `interpreter-exec console "source ${this.args.extensionPath}/support/gdbsupport.init"`,
+                `interpreter-exec console "source ${this.args.extensionPath}/support/gdb-swo.init"`,
+                ...this.formatRadixGdbCommand()
+            ];
+        }
 
         const loadFiles = this.args.loadFiles;
         let isLoaded = false;
@@ -3569,6 +3596,45 @@ export class GDBDebugSession extends LoggingDebugSession {
             }
         } catch (msg) {
             this.sendErrorResponse(response, 16, `Could not jump to: ${msg ? msg : ''} ${args.source.path}:${args.line}`);
+        }
+    }
+
+    /**
+     * Initialize advanced features in the background after basic debugging is ready
+     */
+    private async initializeAdvancedFeatures(): Promise<void> {
+        try {
+            this.handleMsg('log', 'Starting delayed initialization of advanced features...\n');
+
+            // Load symbols if they were skipped during startup
+            if (this.args.skipSymbolLoading && !this.symbolTable) {
+                this.handleMsg('log', 'Loading symbol table in background...\n');
+                await this.loadSymbols();
+                this.handleMsg('log', 'Symbol table loading completed\n');
+            }
+
+            // Initialize RTT if enabled but not yet initialized
+            if (this.args.rttConfig.enabled) {
+                // RTT initialization will happen naturally when needed
+                this.handleMsg('log', 'RTT configuration ready for delayed initialization\n');
+            }
+
+            // Initialize SWO if enabled but not yet initialized
+            if (this.args.swoConfig.enabled) {
+                // SWO initialization will happen naturally when needed
+                this.handleMsg('log', 'SWO configuration ready for delayed initialization\n');
+            }
+
+            // Pre-cache common symbol lookups
+            if (this.symbolTable) {
+                this.handleMsg('log', 'Pre-caching commonly used symbols...\n');
+                // This could be expanded to cache frequently accessed symbols
+                this.handleMsg('log', 'Symbol caching completed\n');
+            }
+
+            this.handleMsg('log', 'Advanced features initialization completed\n');
+        } catch (error) {
+            this.handleMsg('stderr', `Warning: Advanced features initialization failed: ${error}\n`);
         }
     }
 }

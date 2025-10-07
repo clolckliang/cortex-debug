@@ -355,6 +355,11 @@ export interface ConfigurationArguments extends DebugProtocol.LaunchRequestArgum
 
     // External
     gdbTarget: string;
+
+    // Fast startup options
+    fastStart?: boolean;           // Enable fast startup mode
+    skipSymbolLoading?: boolean;   // Skip symbol table loading for faster startup
+    delayedInitialization?: boolean; // Delay non-critical features
 }
 
 export interface DisassemblyInstruction {

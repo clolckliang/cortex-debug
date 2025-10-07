@@ -34,7 +34,8 @@
       "Bash(npx eslint:*)",
       "Bash(node test-structure-parsing.js)",
       "Bash(node test-struct-parser-simple.js)",
-      "Bash(npm install @vscode/codicons)"
+      "Bash(npm install @vscode/codicons)",
+      "Bash(git checkout -- src/backend/symbols.ts)"
     ],
     "deny": [],
     "ask": []

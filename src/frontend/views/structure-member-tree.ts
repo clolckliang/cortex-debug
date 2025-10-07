@@ -26,9 +26,15 @@ export class StructureMemberTreeItem extends vscode.TreeItem {
     }
 }
 
-export class StructureMemberTreeDataProvider implements vscode.TreeDataProvider<StructureMemberTreeItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<StructureMemberTreeItem | undefined | null | void> = new vscode.EventEmitter<StructureMemberTreeItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<StructureMemberTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+export class StructureMemberTreeDataProvider
+implements vscode.TreeDataProvider<StructureMemberTreeItem> {
+    private _onDidChangeTreeData: vscode.EventEmitter<
+        StructureMemberTreeItem | undefined | null | void
+    > = new vscode.EventEmitter<StructureMemberTreeItem | undefined | null | void>();
+
+    readonly onDidChangeTreeData: vscode.Event<
+        StructureMemberTreeItem | undefined | null | void
+    > = this._onDidChangeTreeData.event;
 
     constructor(private parsedStructure: ParsedStructure) {}
 
@@ -44,7 +50,7 @@ export class StructureMemberTreeDataProvider implements vscode.TreeDataProvider<
         if (!element) {
             // Root level - return all top-level members
             return Promise.resolve(
-                this.parsedStructure.members.map(member =>
+                this.parsedStructure.members.map((member) =>
                     new StructureMemberTreeItem(member,
                         member.children && member.children.length > 0
                             ? vscode.TreeItemCollapsibleState.Expanded
@@ -56,7 +62,7 @@ export class StructureMemberTreeDataProvider implements vscode.TreeDataProvider<
             // Child level - return children of the current member
             if (element.member.children && element.member.children.length > 0) {
                 return Promise.resolve(
-                    element.member.children.map(child =>
+                    element.member.children.map((child) =>
                         new StructureMemberTreeItem(child,
                             child.children && child.children.length > 0
                                 ? vscode.TreeItemCollapsibleState.Expanded

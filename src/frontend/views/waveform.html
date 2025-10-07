@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';
+                   font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+    <title>Waveform Monitor</title>
+    ${codiconsUri ? '<link href="' + String(codiconsUri) + '" rel="stylesheet" />' : ''}
+    <style nonce="${nonce}">
+        /* Use VSCode CSS variables directly - no custom color definitions needed */
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-editor-background);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* VSCode-style Toolbar */
+        .toolbar {
+            height: 35px;
+            background-color: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            display: flex;
+            align-items: center;
+            padding: 0 8px;
+            flex-shrink: 0;
+        }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            padding-right: 8px;
+            border-right: 1px solid var(--vscode-widget-border);
+        }
+
+        .toolbar-group:last-child {
+            border-right: none;
+        }
+
+        /* VSCode Action Bar Button Style */
+        .toolbar-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            background: transparent;
+            border: none;
+            border-radius: 5px;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            outline: none;
+            transition: background-color 0.1s ease-in-out;
+            border: 1px solid var(--vscode-button-border, transparent);
+        }
+
+        .toolbar-button:hover {
+            background-color: var(--vscode-toolbar-hoverBackground);
+            border-color: var(--vscode-button-hoverBackground);
+        }
+
+        .toolbar-button:active {
+            background-color: var(--vscode-toolbar-activeBackground);
+        }
+
+        .toolbar-button.active {
+            background-color: var(--vscode-inputOption-activeBackground);
+            color: var(--vscode-inputOption-activeForeground);
+            border: 1px solid var(--vscode-inputOption-activeBorder);
+        }
+
+        .toolbar-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .toolbar-button:disabled:hover {
+            background-color: transparent;
+        }
+
+        /* Codicon support */
+        .toolbar-button .codicon {
+            font-size: 16px;
+            display: block !important;
+            line-height: 16px;
+            width: 16px;
+            height: 16px;
+            color: inherit !important;
+        }
+
+        /* Fallback for missing codicons */
+        .toolbar-button .codicon::before {
+            display: block !important;
+            color: inherit !important;
+        }
+
+        /* Force icon display */
+        .codicon {
+            font-family: "codicon", sans-serif !important;
+        }
+
+        /* Add text fallback for debugging */
+        .toolbar-button[data-fallback]::after {
+            content: attr(data-fallback);
+            font-size: 10px;
+            margin-top: 2px;
+        }
+
+        /* Ensure buttons are visible */
+        .toolbar-button {
+            border: 1px solid var(--vscode-button-border, transparent);
+        }
+
+        .toolbar-button:hover {
+            border-color: var(--vscode-button-hoverBackground);
+        }
+
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 240px;
+            border-right: 1px solid var(--vscode-panel-border);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--vscode-sideBar-background);
+        }
+
+        .sidebar-header {
+            padding: 0 20px;
+            height: 35px;
+            line-height: 35px;
+            background-color: var(--vscode-sideBarSectionHeader-background);
+            color: var(--vscode-sideBarSectionHeader-foreground);
+            border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+        }
+
+        /* Filter Input Area - VSCode search style */
+        .filter-container {
+            padding: 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            background-color: var(--vscode-editor-background);
+        }
+
+        .filter-input-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .filter-input {
+            flex: 1;
+            padding: 4px 8px;
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 2px;
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            font-family: var(--vscode-font-family);
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.1s ease;
+        }
+
+        .filter-input:focus {
+            border-color: var(--vscode-focusBorder);
+        }
+
+        .filter-mode-btn {
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            margin-left: 4px;
+            background: transparent;
+            border: none;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.7;
+            transition: opacity 0.1s ease, background-color 0.1s ease;
+        }
+
+        .filter-mode-btn:hover {
+            opacity: 1;
+            background-color: var(--vscode-toolbar-hoverBackground);
+        }
+
+        .filter-mode-btn.active {
+            color: var(--vscode-foreground);
+            opacity: 1;
+            background-color: var(--vscode-list-activeSelectionBackground);
+        }
+
+        /* Filter Chips - VSCode filter style */
+        .filter-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .filter-chip {
+            padding: 2px 6px;
+            font-size: 10px;
+            border-radius: 8px;
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            border: 1px solid var(--vscode-badge-background);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.1s ease;
+            user-select: none;
+        }
+
+        .filter-chip:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
+        .filter-chip.active {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border-color: var(--vscode-button-background);
+        }
+
+        .filter-chip i {
+            font-size: 10px;
+        }
+
+        /* Variable list items - VSCode tree item style */
+        .variable-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .variable-item {
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            height: 22px;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.1s ease;
+        }
+
+        /* Tree structure styles for struct members */
+        .variable-item.struct {
+            font-weight: 600;
+        }
+
+        .variable-item.struct-member {
+            padding-left: 40px; /* Indent for struct members */
+            font-weight: normal;
+        }
+
+        .variable-item.struct-member.nested {
+            padding-left: 60px; /* Additional indent for nested members */
+        }
+
+        .variable-item .expand-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: transform 0.1s ease;
+        }
+
+        .variable-item .expand-icon:hover {
+            opacity: 1;
+        }
+
+        .variable-item .expand-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .variable-item .variable-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .variable-item .variable-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .variable-item .variable-value {
+            font-family: var(--vscode-editor-font-family);
+            font-size: 11px;
+            opacity: 0.8;
+            margin-left: 8px;
+        }
+
+        .variable-item .variable-type {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-left: 8px;
+            max-width: 80px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Checkbox for member selection */
+        .variable-item .member-checkbox {
+            width: 14px;
+            height: 14px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        /* Struct container */
+        .struct-container {
+            display: none;
+        }
+
+        .struct-container.expanded {
+            display: block;
+        }
+
+        /* Ensure expand icons are visible */
+        .expand-icon {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 16px !important;
+            height: 16px !important;
+            font-size: 12px !important;
+            color: var(--vscode-foreground) !important;
+        }
+
+        .expand-icon.expanded {
+            transform: rotate(90deg) !important;
+        }
+
+        /* Member checkbox styling */
+        .member-checkbox {
+            margin-right: 8px !important;
+        }
+
+        /* Variable icons */
+        .variable-icon {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            color: var(--vscode-descriptionForeground) !important;
+        }
+
+        .variable-item:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .variable-item.selected {
+            background-color: var(--vscode-list-activeSelectionBackground);
+            color: var(--vscode-list-activeSelectionForeground);
+        }
+
+        .variable-item:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+        }
+
+        .variable-item.disabled {
+            opacity: 0.5;
+        }
+
+        /* Drag-and-drop styles */
+        .variable-item.dragging {
+            opacity: 0.4;
+            cursor: grabbing;
+        }
+
+        .variable-item.drop-before {
+            border-top: 2px solid var(--vscode-focusBorder);
+        }
+
+        .variable-item.drop-after {
+            border-bottom: 2px solid var(--vscode-focusBorder);
+        }
+
+        .variable-item[draggable="true"] {
+            cursor: grab;
+        }
+
+        .variable-item[draggable="true"]:active {
+            cursor: grabbing;
+        }
+
+        /* Group Headers - VSCode tree style */
+        .group-header {
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            height: 22px;
+            background-color: var(--vscode-sideBarSectionHeader-background);
+            color: var(--vscode-sideBarSectionHeader-foreground);
+            font-weight: 600;
+            font-size: 11px;
+            cursor: pointer;
+            user-select: none;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+
+        .group-header.collapsed .group-chevron {
+            transform: rotate(-90deg);
+        }
+
+        .group-chevron {
+            margin-right: 6px;
+            transition: transform 0.1s ease;
+        }
+
+        .group-name {
+            flex: 1;
+        }
+
+        .group-count {
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            padding: 1px 5px;
+            border-radius: 10px;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        .group-actions {
+            margin-left: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .group-action-btn {
+            width: 16px;
+            height: 16px;
+            padding: 0;
+            background: transparent;
+            border: none;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.1s ease, background-color 0.1s ease;
+        }
+
+        .group-action-btn:hover {
+            opacity: 1;
+            background-color: var(--vscode-toolbar-hoverBackground);
+        }
+
+        .group-items {
+            background-color: var(--vscode-editor-background);
+        }
+
+        .group-item {
+            padding-left: 28px; /* Indent for group hierarchy */
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            background-color: var(--vscode-editor-background);
+        }
+
+        #waveformCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        /* Status Bar - VSCode style */
+        .status-bar {
+            height: 22px;
+            background-color: var(--vscode-statusBar-background);
+            color: var(--vscode-statusBar-foreground);
+            border-top: 1px solid var(--vscode-statusBar-border);
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .status-item {
+            margin-right: 16px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-label {
+            opacity: 0.7;
+        }
+
+        .status-value {
+            font-family: var(--vscode-editor-font-family);
+            font-weight: 400;
+        }
+
+        /* Variable list items - VSCode tree item style */
+        .variable-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .variable-item {
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            height: 22px;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.1s ease;
+        }
+
+        .variable-item:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .variable-item.selected {
+            background-color: var(--vscode-list-activeSelectionBackground);
+            color: var(--vscode-list-activeSelectionForeground);
+        }
+
+        .variable-item:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+        }
+
+        .variable-item.disabled {
+            opacity: 0.5;
+        }
+
+        /* Drag-and-drop styles */
+        .variable-item.dragging {
+            opacity: 0.4;
+            cursor: grabbing;
+        }
+
+        .variable-item.drop-before {
+            border-top: 2px solid var(--vscode-focusBorder);
+        }
+
+        .variable-item.drop-after {
+            border-bottom: 2px solid var(--vscode-focusBorder);
+        }
+
+        .variable-item[draggable="true"] {
+            cursor: grab;
+        }
+
+        .variable-item[draggable="true"]:active {
+            cursor: grabbing;
+        }
+
+        /* Legend */
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-size: 11px;
+            z-index: 50;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+            border-radius: 2px;
+            border: 1px solid var(--vscode-panel-border);
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: absolute;
+            background-color: var(--vscode-menu-background);
+            border: 1px solid var(--vscode-menu-border);
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            padding: 4px 0;
+            z-index: 2000;
+            min-width: 150px;
+        }
+
+        .context-menu-item {
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        .context-menu-item:hover {
+            background-color: var(--vscode-menu-selectionBackground);
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background-color: var(--vscode-menu-border);
+            margin: 4px 0;
+        }
+
+        /* Tooltips */
+        .tooltip {
+            position: absolute;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            padding: 6px 8px;
+            font-size: 10px;
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 3000;
+            white-space: nowrap;
+            max-width: 300px;
+        }
+
+        /* Selection rectangle */
+        .selection-rect {
+            position: absolute;
+            border: 1px dashed var(--vscode-focusBorder);
+            background-color: var(--vscode-focusBorder);
+            opacity: 0.2;
+            pointer-events: none;
+            z-index: 90;
+        }
+
+        /* Color Indicator */
+        .color-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+
+        /* Variable Info */
+        .variable-info {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* Variable Type Icon */
+        .variable-type-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+
+        /* Trigger Indicator */
+        .trigger-indicator {
+            margin-left: 4px;
+            color: var(--vscode-charts-orange) !important;
+        }
+
+        /* Variable Metadata */
+        .variable-metadata {
+            display: flex;
+            align-items: center;
+            padding: 2px 20px;
+            background-color: var(--vscode-editor-background);
+            border-top: 1px solid var(--vscode-panel-border);
+            font-size: 10px;
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .metadata-badge {
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-right: 6px;
+            font-size: 9px;
+        }
+
+        /* Filter Error Message */
+        .filter-error {
+            padding: 8px 12px;
+            background-color: var(--vscode-inputValidation-errorBackground);
+            color: var(--vscode-inputValidation-errorForeground);
+            border: 1px solid var(--vscode-inputValidation-errorBorder);
+            border-radius: 4px;
+            font-size: 11px;
+            margin-bottom: 8px;
+        }
+
+        /* Measurement Tools */
+        .measurement-line {
+            position: absolute;
+            background-color: var(--vscode-charts-green);
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .measurement-line.horizontal {
+            height: 1px;
+            width: 100%;
+        }
+
+        .measurement-line.vertical {
+            width: 1px;
+            height: 100%;
+        }
+
+        .measurement-text {
+            position: absolute;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-family: var(--vscode-editor-font-family);
+            color: var(--vscode-foreground);
+            z-index: 101;
+            white-space: nowrap;
+        }
+
+        /* Legend */
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-size: 11px;
+            z-index: 50;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+            border-radius: 2px;
+            border: 1px solid var(--vscode-panel-border);
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: absolute;
+            background-color: var(--vscode-menu-background);
+            border: 1px solid var(--vscode-menu-border);
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            padding: 4px 0;
+            z-index: 2000;
+            min-width: 150px;
+        }
+
+        .context-menu-item {
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        .context-menu-item:hover {
+            background-color: var(--vscode-menu-selectionBackground);
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background-color: var(--vscode-menu-border);
+            margin: 4px 0;
+        }
+
+        /* Tooltips */
+        .tooltip {
+            position: absolute;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            padding: 6px 8px;
+            font-size: 10px;
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 3000;
+            white-space: nowrap;
+            max-width: 300px;
+        }
+
+        /* Selection rectangle */
+        .selection-rect {
+            position: absolute;
+            border: 1px dashed var(--vscode-focusBorder);
+            background-color: var(--vscode-focusBorder);
+            opacity: 0.2;
+            pointer-events: none;
+            z-index: 90;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- VSCode-style Toolbar -->
+        <div class="toolbar" role="toolbar" aria-label="Waveform controls">
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnStartStop" title="Start/Stop Recording" aria-label="Start recording" data-fallback="▶">
+                    <i class="codicon codicon-debug-start"></i>
+                </button>
+                <button class="toolbar-button" id="btnClear" title="Clear Data" aria-label="Clear all data" disabled data-fallback="Clear">
+                    <i class="codicon codicon-clear-all"></i>
+                </button>
+                <button class="toolbar-button" id="btnExport" title="Export Data" aria-label="Export data" data-fallback="Save">
+                    <i class="codicon codicon-save"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnZoomIn" title="Zoom In" aria-label="Zoom in" data-fallback="+">
+                    <i class="codicon codicon-zoom-in"></i>
+                </button>
+                <button class="toolbar-button" id="btnZoomOut" title="Zoom Out" aria-label="Zoom out" data-fallback="-">
+                    <i class="codicon codicon-zoom-out"></i>
+                </button>
+                <button class="toolbar-button" id="btnZoomFit" title="Auto Fit" aria-label="Fit to window" data-fallback="Fit">
+                    <i class="codicon codicon-screen-full"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnGrid" title="Toggle Grid" aria-label="Toggle grid" data-fallback="Grid">
+                    <i class="codicon codicon-layout"></i>
+                </button>
+                <button class="toolbar-button" id="btnLegend" title="Toggle Legend" aria-label="Toggle legend" data-fallback="Legend">
+                    <i class="codicon codicon-symbol-color"></i>
+                </button>
+                <button class="toolbar-button" id="btnMeasure" title="Measurement Tools" aria-label="Measurement tools" data-fallback="Measure">
+                    <i class="codicon codicon-ruler"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnFFT" title="FFT Analysis" aria-label="FFT analysis" data-fallback="FFT">
+                    <i class="codicon codicon-graph"></i>
+                </button>
+                <button class="toolbar-button" id="btnSettings" title="Settings" aria-label="Settings" data-fallback="⚙">
+                    <i class="codicon codicon-settings-gear"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Left Sidebar -->
+            <div class="sidebar" role="complementary" aria-label="Variables">
+                <div class="sidebar-header">Variables</div>
+
+                <!-- Quick Filter -->
+                <div class="filter-container">
+                    <div class="filter-input-row">
+                        <input
+                            type="text"
+                            class="filter-input"
+                            id="filterInput"
+                            placeholder="🔍 Filter variables..."
+                            aria-label="Filter variables"
+                        />
+                        <button
+                            class="filter-mode-btn"
+                            id="filterModeBtn"
+                            title="Toggle search mode (text/regex)"
+                            aria-label="Toggle search mode"
+                        >
+                            <i class="codicon codicon-regex"></i>
+                        </button>
+                        <button
+                            class="filter-mode-btn"
+                            id="caseSensitiveBtn"
+                            title="Toggle case sensitive search"
+                            aria-label="Toggle case sensitive"
+                        >
+                            <i class="codicon codicon-case-sensitive"></i>
+                        </button>
+                    </div>
+                    <div class="filter-chips" id="filterChips">
+                        <div class="filter-chip" data-filter="analog" title="Show analog signals">
+                            <i class="codicon codicon-pulse"></i>
+                            <span>Analog</span>
+                        </div>
+                        <div class="filter-chip" data-filter="bit" title="Show bit/digital signals">
+                            <i class="codicon codicon-symbol-boolean"></i>
+                            <span>Bit</span>
+                        </div>
+                        <div class="filter-chip" data-filter="state" title="Show state signals">
+                            <i class="codicon codicon-symbol-enum"></i>
+                            <span>State</span>
+                        </div>
+                        <div class="filter-chip" data-filter="trigger" title="Show signals with triggers">
+                            <i class="codicon codicon-debug-breakpoint-conditional"></i>
+                            <span>Trigger</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="variable-list" id="variableList" role="list" aria-label="Monitored variables"></div>
+            </div>
+
+            <!-- Chart Area -->
+            <div class="chart-container" role="main" aria-label="Waveform chart">
+                <canvas id="waveformCanvas" role="img" aria-label="Real-time waveform display"></canvas>
+
+                <!-- Floating Panels -->
+                <div class="floating-panel settings-panel" id="settingsPanel">
+                    <div class="panel-header">
+                        <span>Settings</span>
+                        <button class="panel-close" id="closeSettings">×</button>
+                    </div>
+                    <div class="panel-content">
+                        <div class="setting-group">
+                            <label for="timeSpan">Time Span (seconds):</label>
+                            <input type="number" id="timeSpan" min="5" max="300" step="5" value="60">
+                        </div>
+                        <div class="setting-group">
+                            <label for="refreshRate">Refresh Rate (Hz):</label>
+                            <input type="number" id="refreshRate" min="0.1" max="10" step="0.1" value="1.0">
+                        </div>
+                        <div class="setting-group">
+                            <label for="maxDataPoints">Max Data Points:</label>
+                            <input type="number" id="maxDataPoints" min="100" max="100000" step="100" value="10000">
+                        </div>
+                        <div class="setting-actions">
+                            <button id="applySettings">Apply</button>
+                            <button id="resetSettings">Reset</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="floating-panel fft-panel" id="fftPanel">
+                    <div class="panel-header">
+                        <span>FFT Analysis</span>
+                        <button class="panel-close" id="closeFFT">×</button>
+                    </div>
+                    <div class="panel-content">
+                        <div id="fftResults"></div>
+                    </div>
+                </div>
+
+                <!-- Measurement Elements -->
+                <div class="measurement-line horizontal" id="measurementH"></div>
+                <div class="measurement-line vertical" id="measurementV"></div>
+                <div class="measurement-text" id="measurementText"></div>
+
+                <!-- Crosshair -->
+                <div class="crosshair" id="crosshair"></div>
+                <div class="coordinate-display" id="coordinateDisplay"></div>
+                <div class="selection-rect" id="selectionRect"></div>
+                <div class="tooltip" id="tooltip"></div>
+
+                <!-- Legend -->
+                <div class="legend" id="legend" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar" role="status" aria-label="Status information">
+            <div class="status-item">
+                <span class="status-label">FPS:</span>
+                <span class="status-value" id="statusFPS">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Variables:</span>
+                <span class="status-value" id="statusVariables">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Data Points:</span>
+                <span class="status-value" id="statusDataPoints">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Zoom:</span>
+                <span class="status-value" id="statusZoom">1.0x</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Time Span:</span>
+                <span class="status-value" id="statusTimeSpan">60s</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Connection:</span>
+                <span class="status-value" id="connectionStatus">disconnected</span>
+            </div>
+        </div>
+    </div>
+
+    <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>

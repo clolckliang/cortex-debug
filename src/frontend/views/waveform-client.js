@@ -1230,9 +1230,21 @@ window.addEventListener('beforeunload', () => {
 window.addEventListener('message', (event) => {
     try {
         const message = event.data;
-        if (!message) return;
+        if (!message) {
+            console.warn('[Waveform Client] Received empty message');
+            return;
+        }
 
-        switch (message.type) {
+        console.log('[Waveform Client] Received message:', message.command || message.type,
+            message.data ? JSON.stringify(message.data).substring(0, 100) + '...' : '');
+
+        // Handle both command and type fields for compatibility
+        const messageType = message.command || message.type;
+
+        switch (messageType) {
+            case 'connectionStatus':
+                handleConnectionStatus(message);
+                break;
             case 'dataUpdate':
                 handleDataUpdate(message);
                 break;
@@ -1245,7 +1257,7 @@ window.addEventListener('message', (event) => {
             case 'highlightVariable':
                 handleHighlightVariable(message);
                 break;
-            case 'variableToggle':
+            case 'toggleVariable':
                 handleVariableToggle(message);
                 break;
             case 'variableStyleUpdate':
@@ -1264,13 +1276,22 @@ window.addEventListener('message', (event) => {
                 handleError(message);
                 break;
             default:
-                console.warn('Unknown message type:', message.type);
+                console.warn('[Waveform Client] Unknown message type:', messageType);
         }
     } catch (error) {
-        console.error('Error handling message from extension:', error);
+        console.error('[Waveform Client] Error handling message from extension:', error);
         showError('Communication error: ' + error.message);
     }
 });
+
+function handleConnectionStatus(message) {
+    if (!message.data) return;
+
+    const connected = message.data.connected;
+    appState.connectionStatus = connected ? 'connected' : 'disconnected';
+    updateConnectionStatus();
+    console.log(`[Waveform Client] Connection status updated:`, appState.connectionStatus);
+}
 
 function handleDataUpdate(message) {
     if (!message.data) return;
@@ -2908,15 +2929,6 @@ function ensureWaveformInitialized() {
     return true;
 }
 
-// Initialize with error handling
-try {
-    initializeWaveform();
-    if (ensureWaveformInitialized()) {
-        startOptimizedRendering();
-        console.log('[Waveform] Rendering system started successfully');
-    }
-} catch (error) {
-    console.error('[Waveform] Failed to initialize waveform:', error);
-}
+// Note: Initialization is handled by the window.addEventListener('load', ...) callback above
 
 // ==================== End UI Enhancement Functions ====================
