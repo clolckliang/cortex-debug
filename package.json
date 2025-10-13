@@ -152,6 +152,15 @@
                             "json",
                             "csv"
                         ]
+                    },
+                    "cortex-debug.waveformRenderer": {
+                        "default": "canvas2d",
+                        "description": "Waveform rendering engine. WebGL provides better performance but requires WebGL2 support",
+                        "type": "string",
+                        "enum": [
+                            "canvas2d",
+                            "webgl"
+                        ]
                     }
                 }
             },
@@ -580,6 +589,11 @@
                 "command": "cortex-debug.liveWatch.addToLiveWatch",
                 "title": "Add to Live Watch",
                 "icon": "$(plus)"
+            },
+            {
+                "command": "cortex-debug.liveWatch.syncWithWaveform",
+                "title": "Sync with Waveform",
+                "icon": "$(sync)"
             },
             {
                 "command": "cortex-debug.liveWatch.setValue",

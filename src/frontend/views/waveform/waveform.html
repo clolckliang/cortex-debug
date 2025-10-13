@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';
+                   font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+    <title>Waveform Monitor</title>
+    ${codiconsUri ? '<link href="' + String(codiconsUri) + '" rel="stylesheet" />' : ''}
+    <style nonce="${nonce}">
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-editor-background);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            height: 35px;
+            background-color: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            display: flex;
+            align-items: center;
+            padding: 0 8px;
+            flex-shrink: 0;
+        }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            padding-right: 8px;
+            border-right: 1px solid var(--vscode-widget-border);
+            margin-right: 8px;
+        }
+
+        .toolbar-group:last-child {
+            border-right: none;
+        }
+
+        .toolbar-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            outline: none;
+            transition: all 0.1s ease;
+        }
+
+        .toolbar-button:hover {
+            background-color: var(--vscode-toolbar-hoverBackground);
+        }
+
+        .toolbar-button.active {
+            background-color: var(--vscode-inputOption-activeBackground);
+            color: var(--vscode-inputOption-activeForeground);
+        }
+
+        .toolbar-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .codicon {
+            font-size: 16px;
+        }
+
+        /* Main content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            border-right: 1px solid var(--vscode-panel-border);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--vscode-sideBar-background);
+        }
+
+        .sidebar-header {
+            padding: 0 16px;
+            height: 35px;
+            line-height: 35px;
+            background-color: var(--vscode-sideBarSectionHeader-background);
+            color: var(--vscode-sideBarSectionHeader-foreground);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Filter */
+        .filter-container {
+            padding: 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+
+        .filter-input {
+            width: 100%;
+            padding: 4px 8px;
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 2px;
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            font-family: var(--vscode-font-family);
+            font-size: 12px;
+            outline: none;
+        }
+
+        .filter-input:focus {
+            border-color: var(--vscode-focusBorder);
+        }
+
+        /* Variable list */
+        .variable-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .variable-item {
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            height: 22px;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.1s ease;
+        }
+
+        .variable-item:hover {
+            background-color: var(--vscode-list-hoverBackground);
+        }
+
+        .variable-item.selected {
+            background-color: var(--vscode-list-activeSelectionBackground);
+            color: var(--vscode-list-activeSelectionForeground);
+        }
+
+        .color-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+
+        .variable-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+        }
+
+        .variable-value {
+            font-family: var(--vscode-editor-font-family);
+            font-size: 11px;
+            opacity: 0.7;
+            margin-left: 8px;
+        }
+
+        /* Chart area */
+        .chart-container {
+            flex: 1;
+            position: relative;
+            background-color: var(--vscode-editor-background);
+        }
+
+        #waveformCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        /* Status bar */
+        .status-bar {
+            height: 22px;
+            background-color: var(--vscode-statusBar-background);
+            color: var(--vscode-statusBar-foreground);
+            border-top: 1px solid var(--vscode-statusBar-border);
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .status-item {
+            margin-right: 16px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-label {
+            opacity: 0.7;
+        }
+
+        .status-value {
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        /* Performance indicator */
+        .performance-indicator {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            padding: 4px 8px;
+            font-size: 10px;
+            opacity: 0.8;
+            z-index: 100;
+        }
+
+        .performance-indicator.good { color: var(--vscode-charts-green); }
+        .performance-indicator.warning { color: var(--vscode-charts-yellow); }
+        .performance-indicator.bad { color: var(--vscode-charts-red); }
+
+        /* Legend */
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 11px;
+            z-index: 50;
+            display: none;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 4px 0;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 3px;
+            margin-right: 8px;
+            border-radius: 1px;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 3px;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-family: var(--vscode-editor-font-family);
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+            white-space: nowrap;
+        }
+
+        /* Measurement tools */
+        .measurement-line {
+            position: absolute;
+            background-color: var(--vscode-charts-orange);
+            pointer-events: none;
+            z-index: 90;
+            display: none;
+        }
+
+        .measurement-line.horizontal {
+            height: 1px;
+            width: 100%;
+        }
+
+        .measurement-line.vertical {
+            width: 1px;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Toolbar -->
+        <div class="toolbar" role="toolbar" aria-label="Waveform controls">
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnRecord" title="Start/Stop Recording" aria-label="Toggle recording">
+                    <i class="codicon codicon-record"></i>
+                </button>
+                <button class="toolbar-button" id="btnClear" title="Clear Data" aria-label="Clear all data">
+                    <i class="codicon codicon-clear-all"></i>
+                </button>
+                <button class="toolbar-button" id="btnExport" title="Export Data" aria-label="Export data">
+                    <i class="codicon codicon-save"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnZoomIn" title="Zoom In" aria-label="Zoom in">
+                    <i class="codicon codicon-zoom-in"></i>
+                </button>
+                <button class="toolbar-button" id="btnZoomOut" title="Zoom Out" aria-label="Zoom out">
+                    <i class="codicon codicon-zoom-out"></i>
+                </button>
+                <button class="toolbar-button" id="btnZoomFit" title="Fit to Window" aria-label="Fit to window">
+                    <i class="codicon codicon-screen-full"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnGrid" title="Toggle Grid" aria-label="Toggle grid">
+                    <i class="codicon codicon-layout"></i>
+                </button>
+                <button class="toolbar-button" id="btnLegend" title="Toggle Legend" aria-label="Toggle legend">
+                    <i class="codicon codicon-list-tree"></i>
+                </button>
+                <button class="toolbar-button" id="btnMeasure" title="Measurement Tools" aria-label="Measurement tools">
+                    <i class="codicon codicon-ruler"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-button" id="btnFFT" title="FFT Analysis" aria-label="FFT analysis">
+                    <i class="codicon codicon-graph"></i>
+                </button>
+                <button class="toolbar-button" id="btnSettings" title="Settings" aria-label="Settings">
+                    <i class="codicon codicon-settings-gear"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <div class="sidebar" role="complementary" aria-label="Variables">
+                <div class="sidebar-header">Variables</div>
+
+                <div class="filter-container">
+                    <input
+                        type="text"
+                        class="filter-input"
+                        id="filterInput"
+                        placeholder="Filter variables..."
+                        aria-label="Filter variables"
+                    />
+                </div>
+
+                <div class="variable-list" id="variableList" role="list"></div>
+            </div>
+
+            <!-- Chart Area -->
+            <div class="chart-container" role="main" aria-label="Waveform chart">
+                <div class="performance-indicator good" id="performanceIndicator">
+                    <span id="fpsDisplay">60 FPS</span>
+                </div>
+
+                <canvas id="waveformCanvas" role="img" aria-label="Real-time waveform display"></canvas>
+
+                <div class="legend" id="legend"></div>
+                <div class="tooltip" id="tooltip"></div>
+
+                <div class="measurement-line horizontal" id="measurementH"></div>
+                <div class="measurement-line vertical" id="measurementV"></div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar" role="status" aria-label="Status information">
+            <div class="status-item">
+                <span class="status-label">FPS:</span>
+                <span class="status-value" id="statusFPS">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Variables:</span>
+                <span class="status-value" id="statusVariables">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Data Points:</span>
+                <span class="status-value" id="statusDataPoints">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Zoom:</span>
+                <span class="status-value" id="statusZoom">1.0x</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Renderer:</span>
+                <span class="status-value" id="statusRenderer">WebGL</span>
+            </div>
+        </div>
+    </div>
+
+    <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>
+
+

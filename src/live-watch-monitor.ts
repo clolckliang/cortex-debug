@@ -14,6 +14,56 @@ interface SampleData {
     variablesReference?: number;
 }
 
+interface HistoricalSampleData {
+    timestamp: number;
+    value: string;
+    type?: string;
+    variablesReference?: number;
+    changeRate?: number; // Rate of change from previous sample
+}
+
+interface SamplingStats {
+    totalSamples: number;
+    averageIntervalMs: number;
+    lastSampleTime: number;
+    samplingErrors: number;
+    variablesCount: number;
+}
+
+interface ConditionalTrigger {
+    variable: string;
+    condition: 'change' | 'equals' | 'greater' | 'less' | 'range';
+    value?: any;
+    minValue?: any;
+    maxValue?: any;
+    debounceMs?: number;
+    lastTriggerTime?: number;
+}
+
+interface ConditionalSamplingConfig {
+    enabled: boolean;
+    triggers: ConditionalTrigger[];
+    action: 'sample' | 'pause' | 'resume';
+}
+
+interface AdaptiveSamplingConfig {
+    enabled: boolean;
+    minIntervalMs: number;
+    maxIntervalMs: number;
+    changeThreshold: number;
+    stabilityPeriodMs: number;
+    adjustmentFactor: number;
+}
+
+interface PerformanceOptimizationConfig {
+    enabled: boolean;
+    batchSize: number;
+    memoryLimitMB: number;
+    compressionEnabled: boolean;
+    cacheTimeoutMs: number;
+    maxConcurrentRequests: number;
+}
+
 export type VariableType = string | VariableObject | ExtendedVariable;
 export interface NameToVarChangeInfo {
     [name: string]: any;
@@ -402,11 +452,76 @@ export class LiveWatchMonitor {
     private samplingEnabled: boolean = false;
     private cachedSamples: Map<string, SampleData> = new Map();
 
+    // Historical data buffering
+    private historicalData: Map<string, HistoricalSampleData[]> = new Map();
+    private maxHistorySize: number = 1000; // Maximum samples per variable
+    private samplingStats: SamplingStats = {
+        totalSamples: 0,
+        averageIntervalMs: 0,
+        lastSampleTime: 0,
+        samplingErrors: 0,
+        variablesCount: 0
+    };
+
+    // Conditional sampling
+    private conditionalSampling: ConditionalSamplingConfig | null = null;
+    private previousValues: Map<string, string> = new Map(); // Track previous values for change detection
+
+    // Adaptive sampling
+    private adaptiveSampling: AdaptiveSamplingConfig | null = null;
+    private variableChangeRates: Map<string, number> = new Map();
+    private lastAdaptiveAdjustment: number = 0;
+
+    // Performance optimization
+    private performanceOptimization: PerformanceOptimizationConfig | null = null;
+    private requestQueue: RequestQueue<any, any> = new RequestQueue<any, any>();
+    private memoryUsage: number = 0;
+    private compressionCache: Map<string, string> = new Map();
+
     constructor(private mainSession: GDBDebugSession) {
         this.varHandler = new VariablesHandler(
             (): boolean => false,
             (r: DebugProtocol.Response, a: any) => { }
         );
+
+        // Initialize historical data settings from configuration
+        const liveWatchConfig = mainSession.args.liveWatch;
+        if (liveWatchConfig?.historicalData?.enabled) {
+            this.maxHistorySize = liveWatchConfig.historicalData.maxSamples || 1000;
+        }
+
+        // Initialize conditional sampling from configuration
+        if (liveWatchConfig?.conditionalSampling?.enabled) {
+            this.conditionalSampling = {
+                enabled: true,
+                triggers: liveWatchConfig.conditionalSampling.triggers || [],
+                action: liveWatchConfig.conditionalSampling.action || 'sample'
+            };
+        }
+
+        // Initialize adaptive sampling from configuration
+        if (liveWatchConfig?.adaptiveSampling?.enabled) {
+            this.adaptiveSampling = {
+                enabled: true,
+                minIntervalMs: liveWatchConfig.adaptiveSampling.minIntervalMs || 1,
+                maxIntervalMs: liveWatchConfig.adaptiveSampling.maxIntervalMs || 1000,
+                changeThreshold: liveWatchConfig.adaptiveSampling.changeThreshold || 0.1,
+                stabilityPeriodMs: liveWatchConfig.adaptiveSampling.stabilityPeriodMs || 5000,
+                adjustmentFactor: liveWatchConfig.adaptiveSampling.adjustmentFactor || 0.5
+            };
+        }
+
+        // Initialize performance optimization from configuration
+        if (liveWatchConfig?.performanceOptimization?.enabled) {
+            this.performanceOptimization = {
+                enabled: true,
+                batchSize: liveWatchConfig.performanceOptimization.batchSize || 10,
+                memoryLimitMB: liveWatchConfig.performanceOptimization.memoryLimitMB || 100,
+                compressionEnabled: liveWatchConfig.performanceOptimization.compressionEnabled || true,
+                cacheTimeoutMs: liveWatchConfig.performanceOptimization.cacheTimeoutMs || 5000,
+                maxConcurrentRequests: liveWatchConfig.performanceOptimization.maxConcurrentRequests || 5
+            };
+        }
     }
 
     public setupEvents(mi2: MI2) {
@@ -488,31 +603,68 @@ export class LiveWatchMonitor {
             return;
         }
 
+        const samplingStartTime = Date.now();
+
         try {
             // Refresh the cache using existing mechanism
             this.varHandler.refreshCachedChangeList(this.miDebugger, () => {
                 // Cache is now updated, store samples with timestamp
                 const timestamp = Date.now();
 
+                // Update sampling statistics
+                this.samplingStats.totalSamples++;
+                if (this.samplingStats.lastSampleTime > 0) {
+                    const interval = timestamp - this.samplingStats.lastSampleTime;
+                    this.samplingStats.averageIntervalMs
+                        = (this.samplingStats.averageIntervalMs * (this.samplingStats.totalSamples - 1) + interval)
+                        / this.samplingStats.totalSamples;
+                }
+                this.samplingStats.lastSampleTime = timestamp;
+
                 // Iterate through all cached variables and store their current values
                 if (this.varHandler.cachedChangeList) {
+                    this.samplingStats.variablesCount = Object.keys(this.varHandler.cachedChangeList).length;
+
                     for (const [varName, change] of Object.entries(this.varHandler.cachedChangeList)) {
                         const varId = this.varHandler.variableHandlesReverse.get(varName);
                         if (varId !== undefined) {
                             const varObj = this.varHandler.variableHandles.get(varId) as VariableObject;
                             if (varObj) {
+                                const currentValue = varObj.value || '';
+                                const currentType = varObj.type;
+                                const currentVarRef = varObj.isCompound() ? varId : 0;
+
+                                // Store in cache
                                 this.cachedSamples.set(varName, {
                                     timestamp,
-                                    value: varObj.value || '',
-                                    type: varObj.type,
-                                    variablesReference: varObj.isCompound() ? varId : 0
+                                    value: currentValue,
+                                    type: currentType,
+                                    variablesReference: currentVarRef
                                 });
+
+                                // Store in historical data
+                                this.storeHistoricalSample(varName, {
+                                    timestamp,
+                                    value: currentValue,
+                                    type: currentType,
+                                    variablesReference: currentVarRef
+                                });
+
+                                // Check conditional triggers
+                                this.checkConditionalTriggers(varName, currentValue, timestamp);
+
+                                // Update adaptive sampling
+                                this.updateAdaptiveSampling(varName, currentValue, timestamp);
+
+                                // Apply performance optimizations
+                                this.optimizeMemoryUsage();
                             }
                         }
                     }
                 }
             });
         } catch (error) {
+            this.samplingStats.samplingErrors++;
             if (this.mainSession.args.showDevDebugOutput) {
                 this.mainSession.handleMsg('stderr', `LiveWatch sampling error: ${error}\n`);
             }
@@ -528,10 +680,331 @@ export class LiveWatchMonitor {
     }
 
     /**
+     * Store historical sample data for a variable
+     * @param varName Variable name
+     * @param sample Sample data
+     */
+    private storeHistoricalSample(varName: string, sample: HistoricalSampleData) {
+        if (!this.historicalData.has(varName)) {
+            this.historicalData.set(varName, []);
+        }
+
+        const history = this.historicalData.get(varName);
+        const previousSample = history && history.length > 0 ? history[history.length - 1] : null;
+
+        // Calculate change rate if enabled in configuration and we have a previous sample
+        const liveWatchConfig = this.mainSession.args.liveWatch;
+        if (liveWatchConfig?.historicalData?.enableChangeRate && previousSample) {
+            try {
+                const prevValue = parseFloat(previousSample.value);
+                const currValue = parseFloat(sample.value);
+                if (!isNaN(prevValue) && !isNaN(currValue)) {
+                    const timeDiff = sample.timestamp - previousSample.timestamp;
+                    if (timeDiff > 0) {
+                        sample.changeRate = (currValue - prevValue) / timeDiff;
+                    }
+                }
+            } catch (e) {
+                // Ignore parsing errors for non-numeric values
+            }
+        }
+
+        history.push(sample);
+
+        // Maintain maximum history size
+        if (history.length > this.maxHistorySize) {
+            history.shift(); // Remove oldest sample
+        }
+    }
+
+    /**
+     * Get historical data for a variable
+     * @param varName Variable name
+     * @param maxSamples Maximum number of samples to return (default: all)
+     */
+    public getHistoricalData(varName: string, maxSamples?: number): HistoricalSampleData[] {
+        const history = this.historicalData.get(varName) || [];
+        if (maxSamples && maxSamples > 0) {
+            return history.slice(-maxSamples);
+        }
+        return [...history];
+    }
+
+    /**
+     * Get historical data for all variables
+     * @param maxSamples Maximum number of samples per variable
+     */
+    public getAllHistoricalData(maxSamples?: number): Map<string, HistoricalSampleData[]> {
+        const result = new Map<string, HistoricalSampleData[]>();
+        for (const [varName, history] of this.historicalData) {
+            result.set(varName, this.getHistoricalData(varName, maxSamples));
+        }
+        return result;
+    }
+
+    /**
+     * Get sampling statistics
+     */
+    public getSamplingStats(): SamplingStats {
+        return { ...this.samplingStats };
+    }
+
+    /**
+     * Clear historical data for a specific variable
+     * @param varName Variable name
+     */
+    public clearHistoricalData(varName: string): void {
+        this.historicalData.delete(varName);
+    }
+
+    /**
+     * Clear all historical data
+     */
+    public clearAllHistoricalData(): void {
+        this.historicalData.clear();
+    }
+
+    /**
+     * Set maximum history size per variable
+     * @param size Maximum number of samples to keep per variable
+     */
+    public setMaxHistorySize(size: number): void {
+        this.maxHistorySize = Math.max(1, size);
+
+        // Trim existing histories if needed
+        for (const [varName, history] of this.historicalData) {
+            if (history.length > this.maxHistorySize) {
+                this.historicalData.set(varName, history.slice(-this.maxHistorySize));
+            }
+        }
+    }
+
+    /**
+     * Check conditional triggers for a variable
+     * @param varName Variable name
+     * @param currentValue Current value
+     * @param timestamp Current timestamp
+     */
+    private checkConditionalTriggers(varName: string, currentValue: string, timestamp: number): void {
+        if (!this.conditionalSampling || !this.conditionalSampling.enabled) {
+            return;
+        }
+
+        for (const trigger of this.conditionalSampling.triggers) {
+            if (trigger.variable !== varName) {
+                continue;
+            }
+
+            // Check debounce
+            const debounceMs = trigger.debounceMs || 100;
+            if (trigger.lastTriggerTime && (timestamp - trigger.lastTriggerTime) < debounceMs) {
+                continue;
+            }
+
+            // Check trigger condition
+            if (this.evaluateTriggerCondition(trigger, currentValue)) {
+                trigger.lastTriggerTime = timestamp;
+                this.executeTriggerAction(trigger, varName, currentValue);
+            }
+        }
+
+        // Update previous value for change detection
+        this.previousValues.set(varName, currentValue);
+    }
+
+    /**
+     * Evaluate a trigger condition
+     * @param trigger Trigger configuration
+     * @param currentValue Current variable value
+     */
+    private evaluateTriggerCondition(trigger: ConditionalTrigger, currentValue: string): boolean {
+        try {
+            switch (trigger.condition) {
+                case 'change': {
+                    const previousValue = this.previousValues.get(trigger.variable);
+                    return previousValue !== undefined && previousValue !== currentValue;
+                }
+
+                case 'equals':
+                    return currentValue === trigger.value?.toString();
+
+                case 'greater': {
+                    const currentNum = parseFloat(currentValue);
+                    const targetNum = parseFloat(trigger.value?.toString() || '0');
+                    return !isNaN(currentNum) && !isNaN(targetNum) && currentNum > targetNum;
+                }
+
+                case 'less': {
+                    const currentNumLess = parseFloat(currentValue);
+                    const targetNumLess = parseFloat(trigger.value?.toString() || '0');
+                    return !isNaN(currentNumLess) && !isNaN(targetNumLess) && currentNumLess < targetNumLess;
+                }
+
+                case 'range': {
+                    const currentNumRange = parseFloat(currentValue);
+                    const minNum = parseFloat(trigger.minValue?.toString() || '0');
+                    const maxNum = parseFloat(trigger.maxValue?.toString() || '0');
+                    return !isNaN(currentNumRange) && !isNaN(minNum) && !isNaN(maxNum)
+                        && currentNumRange >= minNum && currentNumRange <= maxNum;
+                }
+
+                default:
+                    return false;
+            }
+        } catch (error) {
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('stderr', `Conditional trigger evaluation error: ${error}\n`);
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Execute trigger action
+     * @param trigger Trigger configuration
+     * @param varName Variable name
+     * @param currentValue Current value
+     */
+    private executeTriggerAction(trigger: ConditionalTrigger, varName: string, currentValue: string): void {
+        if (!this.conditionalSampling) {
+            return;
+        }
+
+        const message = `Conditional trigger activated: ${varName} ${trigger.condition} ${trigger.value || ''} (value: ${currentValue})`;
+
+        if (this.mainSession.args.showDevDebugOutput) {
+            this.mainSession.handleMsg('log', `${message}\n`);
+        }
+
+        switch (this.conditionalSampling.action) {
+            case 'sample':
+                // Force an immediate sampling cycle
+                this.performSampling();
+                break;
+            case 'pause':
+                // Pause sampling
+                this.stopSampling();
+                break;
+            case 'resume':
+                // Resume sampling if paused
+                if (!this.samplingEnabled) {
+                    this.startSampling(this.samplingIntervalMs);
+                }
+                break;
+        }
+    }
+
+    /**
      * Get all cached samples
      */
     public getAllCachedSamples(): Map<string, SampleData> {
         return new Map(this.cachedSamples);
+    }
+
+    /**
+     * Get conditional triggers configuration
+     */
+    public getConditionalTriggers(): ConditionalTrigger[] {
+        return this.conditionalSampling?.triggers || [];
+    }
+
+    /**
+     * Set conditional triggers configuration
+     * @param triggers Array of trigger configurations
+     * @param action Action to take when triggered
+     */
+    public setConditionalTriggers(triggers: ConditionalTrigger[], action: 'sample' | 'pause' | 'resume'): void {
+        this.conditionalSampling = {
+            enabled: triggers.length > 0,
+            triggers: triggers,
+            action: action
+        };
+    }
+
+    /**
+     * Export historical data to CSV format
+     * @param varName Optional variable name to export specific variable, or undefined for all
+     * @param maxSamples Maximum number of samples to export
+     */
+    public exportToCSV(varName?: string, maxSamples?: number): string {
+        if (varName) {
+            // Export single variable
+            const data = this.getHistoricalData(varName, maxSamples);
+            const csvLines = ['timestamp,value,type,changeRate'];
+            for (const sample of data) {
+                const timestamp = new Date(sample.timestamp).toISOString();
+                const value = sample.value.replace(/"/g, '""'); // Escape quotes
+                const type = sample.type || '';
+                const changeRate = sample.changeRate || '';
+                csvLines.push(`"${timestamp}","${value}","${type}","${changeRate}"`);
+            }
+            return csvLines.join('\n');
+        } else {
+            // Export all variables
+            const data = this.getAllHistoricalData(maxSamples);
+            const csvLines = ['timestamp,variable,value,type,changeRate'];
+            for (const [varName, samples] of data) {
+                for (const sample of samples) {
+                    const timestamp = new Date(sample.timestamp).toISOString();
+                    const value = sample.value.replace(/"/g, '""'); // Escape quotes
+                    const type = sample.type || '';
+                    const changeRate = sample.changeRate || '';
+                    csvLines.push(`"${timestamp}","${varName}","${value}","${type}","${changeRate}"`);
+                }
+            }
+            return csvLines.join('\n');
+        }
+    }
+
+    /**
+     * Export historical data to JSON format
+     * @param varName Optional variable name to export specific variable, or undefined for all
+     * @param maxSamples Maximum number of samples to export
+     */
+    public exportToJSON(varName?: string, maxSamples?: number): string {
+        if (varName) {
+            // Export single variable
+            const data = this.getHistoricalData(varName, maxSamples);
+            return JSON.stringify({
+                variable: varName,
+                samples: data.map((sample) => ({
+                    timestamp: sample.timestamp,
+                    value: sample.value,
+                    type: sample.type,
+                    changeRate: sample.changeRate
+                })),
+                metadata: {
+                    totalSamples: data.length,
+                    exportTime: new Date().toISOString(),
+                    maxSamples: maxSamples
+                }
+            }, null, 2);
+        } else {
+            // Export all variables
+            const data = this.getAllHistoricalData(maxSamples);
+            const exportData: any = {
+                variables: {},
+                metadata: {
+                    totalVariables: data.size,
+                    exportTime: new Date().toISOString(),
+                    maxSamples: maxSamples
+                }
+            };
+
+            for (const [varName, samples] of data) {
+                exportData.variables[varName] = {
+                    samples: samples.map((sample) => ({
+                        timestamp: sample.timestamp,
+                        value: sample.value,
+                        type: sample.type,
+                        changeRate: sample.changeRate
+                    })),
+                    totalSamples: samples.length
+                };
+            }
+
+            return JSON.stringify(exportData, null, 2);
+        }
     }
 
     /**
@@ -713,6 +1186,225 @@ export class LiveWatchMonitor {
         return new Promise<void>((resolve) => {
             this.varHandler.refreshCachedChangeList(this.miDebugger, resolve);
         });
+    }
+
+    // Adaptive sampling methods
+    private updateAdaptiveSampling(varName: string, currentValue: string, timestamp: number): void {
+        if (!this.adaptiveSampling?.enabled) {
+            return;
+        }
+
+        const previousValue = this.previousValues.get(varName);
+        if (previousValue !== undefined) {
+            // Calculate change rate
+            const changeRate = this.calculateChangeRate(previousValue, currentValue);
+            this.variableChangeRates.set(varName, changeRate);
+        }
+
+        this.previousValues.set(varName, currentValue);
+
+        // Check if we should adjust sampling interval
+        const now = Date.now();
+        if (now - this.lastAdaptiveAdjustment > this.adaptiveSampling.stabilityPeriodMs) {
+            this.adjustSamplingInterval();
+            this.lastAdaptiveAdjustment = now;
+        }
+    }
+
+    private calculateChangeRate(oldValue: string, newValue: string): number {
+        try {
+            const oldNum = parseFloat(oldValue);
+            const newNum = parseFloat(newValue);
+
+            if (isNaN(oldNum) || isNaN(newNum)) {
+                // For non-numeric values, use string comparison
+                return oldValue === newValue ? 0 : 1;
+            }
+
+            if (oldNum === 0) {
+                return newNum === 0 ? 0 : 1;
+            }
+
+            return Math.abs((newNum - oldNum) / oldNum);
+        } catch (error) {
+            return oldValue === newValue ? 0 : 1;
+        }
+    }
+
+    private adjustSamplingInterval(): void {
+        if (!this.adaptiveSampling) {
+            return;
+        }
+
+        const changeRates = Array.from(this.variableChangeRates.values());
+        if (changeRates.length === 0) {
+            return;
+        }
+
+        const averageChangeRate = changeRates.reduce((sum, rate) => sum + rate, 0) / changeRates.length;
+        const maxChangeRate = Math.max(...changeRates);
+
+        let newInterval = this.samplingIntervalMs;
+
+        if (maxChangeRate > this.adaptiveSampling.changeThreshold) {
+            // High change rate - decrease interval (sample more frequently)
+            newInterval = Math.max(
+                this.samplingIntervalMs * (1 - this.adaptiveSampling.adjustmentFactor),
+                this.adaptiveSampling.minIntervalMs
+            );
+        } else if (averageChangeRate < this.adaptiveSampling.changeThreshold * 0.1) {
+            // Low change rate - increase interval (sample less frequently)
+            newInterval = Math.min(
+                this.samplingIntervalMs * (1 + this.adaptiveSampling.adjustmentFactor),
+                this.adaptiveSampling.maxIntervalMs
+            );
+        }
+
+        if (Math.abs(newInterval - this.samplingIntervalMs) > 1) {
+            this.samplingIntervalMs = newInterval;
+
+            // Restart sampling with new interval
+            if (this.samplingEnabled) {
+                this.stopSampling();
+                this.startSampling();
+            }
+
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('stderr',
+                    `LiveWatch adaptive sampling: interval adjusted to ${this.samplingIntervalMs}ms (avg change rate: ${averageChangeRate.toFixed(3)})\n`);
+            }
+        }
+    }
+
+    public getAdaptiveSamplingConfig(): AdaptiveSamplingConfig | null {
+        return this.adaptiveSampling;
+    }
+
+    public setAdaptiveSamplingConfig(config: AdaptiveSamplingConfig): void {
+        this.adaptiveSampling = config;
+
+        // Reset change rates when config changes
+        this.variableChangeRates.clear();
+        this.lastAdaptiveAdjustment = 0;
+    }
+
+    public getVariableChangeRates(): Map<string, number> {
+        return new Map(this.variableChangeRates);
+    }
+
+    // Performance optimization methods
+    public getPerformanceOptimizationConfig(): PerformanceOptimizationConfig | null {
+        return this.performanceOptimization;
+    }
+
+    public setPerformanceOptimizationConfig(config: PerformanceOptimizationConfig): void {
+        this.performanceOptimization = config;
+    }
+
+    public getMemoryUsage(): number {
+        return this.memoryUsage;
+    }
+
+    public optimizeMemoryUsage(): void {
+        if (!this.performanceOptimization?.enabled) {
+            return;
+        }
+
+        const memoryLimitBytes = this.performanceOptimization.memoryLimitMB * 1024 * 1024;
+
+        if (this.memoryUsage > memoryLimitBytes) {
+            // Clear old historical data
+            const maxSamples = Math.floor(this.maxHistorySize * 0.5);
+            for (const [varName, data] of this.historicalData) {
+                if (data.length > maxSamples) {
+                    this.historicalData.set(varName, data.slice(-maxSamples));
+                }
+            }
+
+            // Clear compression cache
+            this.compressionCache.clear();
+
+            // Update memory usage estimate
+            this.updateMemoryUsage();
+
+            if (this.mainSession.args.showDevDebugOutput) {
+                this.mainSession.handleMsg('stderr',
+                    `LiveWatch memory optimization: cleared old data, current usage: ${(this.memoryUsage / 1024 / 1024).toFixed(2)}MB\n`);
+            }
+        }
+    }
+
+    private updateMemoryUsage(): void {
+        let totalSize = 0;
+
+        // Estimate memory usage from historical data
+        for (const [varName, data] of this.historicalData) {
+            totalSize += varName.length * 2; // UTF-16 string
+            totalSize += data.length * 50; // Estimate 50 bytes per sample
+        }
+
+        // Estimate memory usage from cached samples
+        for (const [varName, sample] of this.cachedSamples) {
+            totalSize += varName.length * 2;
+            totalSize += (sample.value?.length || 0) * 2;
+            totalSize += (sample.type?.length || 0) * 2;
+        }
+
+        // Estimate memory usage from compression cache
+        for (const [key, value] of this.compressionCache) {
+            totalSize += key.length * 2;
+            totalSize += value.length * 2;
+        }
+
+        this.memoryUsage = totalSize;
+    }
+
+    private compressValue(value: string): string {
+        if (!this.performanceOptimization?.compressionEnabled) {
+            return value;
+        }
+
+        // Simple compression: remove common patterns
+        const compressed = value
+            .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+            .replace(/0x0+/g, '0x0') // Compress hex zeros
+            .replace(/\.0+/g, '.0'); // Compress decimal zeros
+
+        // Cache compressed value
+        this.compressionCache.set(value, compressed);
+
+        return compressed;
+    }
+
+    private decompressValue(compressed: string): string {
+        if (!this.performanceOptimization?.compressionEnabled) {
+            return compressed;
+        }
+
+        // Find original value in cache
+        for (const [original, comp] of this.compressionCache) {
+            if (comp === compressed) {
+                return original;
+            }
+        }
+
+        return compressed;
+    }
+
+    public getPerformanceStats(): {
+        memoryUsageMB: number;
+        historicalDataSize: number;
+        cachedSamplesSize: number;
+        compressionCacheSize: number;
+    } {
+        this.updateMemoryUsage();
+
+        return {
+            memoryUsageMB: this.memoryUsage / 1024 / 1024,
+            historicalDataSize: this.historicalData.size,
+            cachedSamplesSize: this.cachedSamples.size,
+            compressionCacheSize: this.compressionCache.size
+        };
     }
 
     private quitting = false;

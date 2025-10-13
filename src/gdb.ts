@@ -1293,6 +1293,174 @@ export class GDBDebugSession extends LoggingDebugSession {
                 }
                 this.sendResponse(response);
                 break;
+            case 'liveGetHistoricalData':
+                if (this.miLiveGdb) {
+                    const varName = args.varName;
+                    const maxSamples = args.maxSamples;
+                    const historicalData = varName
+                        ? this.miLiveGdb.getHistoricalData(varName, maxSamples)
+                        : Array.from(this.miLiveGdb.getAllHistoricalData(maxSamples).entries()).map(([name, data]) => ({ name, data }));
+                    response.body = { historicalData };
+                } else {
+                    response.body = { historicalData: [] };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveGetSamplingStats':
+                if (this.miLiveGdb) {
+                    const stats = this.miLiveGdb.getSamplingStats();
+                    response.body = { stats };
+                } else {
+                    response.body = { stats: null };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveClearHistoricalData':
+                if (this.miLiveGdb) {
+                    const varName = args.varName;
+                    if (varName) {
+                        this.miLiveGdb.clearHistoricalData(varName);
+                    } else {
+                        this.miLiveGdb.clearAllHistoricalData();
+                    }
+                    response.body = { success: true };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveSetMaxHistorySize':
+                if (this.miLiveGdb) {
+                    const size = args.size;
+                    if (typeof size === 'number' && size > 0) {
+                        this.miLiveGdb.setMaxHistorySize(size);
+                        response.body = { success: true, maxHistorySize: size };
+                    } else {
+                        response.body = { success: false, error: 'Invalid size parameter' };
+                    }
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveGetConditionalTriggers':
+                if (this.miLiveGdb) {
+                    const triggers = this.miLiveGdb.getConditionalTriggers();
+                    response.body = { triggers };
+                } else {
+                    response.body = { triggers: [] };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveSetConditionalTriggers':
+                if (this.miLiveGdb) {
+                    const triggers = args.triggers;
+                    const action = args.action || 'sample';
+                    this.miLiveGdb.setConditionalTriggers(triggers, action);
+                    response.body = { success: true };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+            case 'liveExportData':
+                if (this.miLiveGdb) {
+                    const format = args.format || 'json'; // 'json' or 'csv'
+                    const varName = args.varName; // Optional variable name
+                    const maxSamples = args.maxSamples; // Optional max samples
+
+                    let exportData: string;
+                    if (format === 'csv') {
+                        exportData = this.miLiveGdb.exportToCSV(varName, maxSamples);
+                    } else {
+                        exportData = this.miLiveGdb.exportToJSON(varName, maxSamples);
+                    }
+
+                    response.body = {
+                        success: true,
+                        format: format,
+                        data: exportData,
+                        varName: varName,
+                        maxSamples: maxSamples
+                    };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveGetAdaptiveSamplingConfig':
+                if (this.miLiveGdb) {
+                    const config = this.miLiveGdb.getAdaptiveSamplingConfig();
+                    response.body = { config };
+                } else {
+                    response.body = { config: null };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveSetAdaptiveSamplingConfig':
+                if (this.miLiveGdb) {
+                    const config = args.config;
+                    this.miLiveGdb.setAdaptiveSamplingConfig(config);
+                    response.body = { success: true };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveGetVariableChangeRates':
+                if (this.miLiveGdb) {
+                    const changeRates = this.miLiveGdb.getVariableChangeRates();
+                    response.body = { changeRates: Array.from(changeRates.entries()) };
+                } else {
+                    response.body = { changeRates: [] };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveGetPerformanceOptimizationConfig':
+                if (this.miLiveGdb) {
+                    const config = this.miLiveGdb.getPerformanceOptimizationConfig();
+                    response.body = { config };
+                } else {
+                    response.body = { config: null };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveSetPerformanceOptimizationConfig':
+                if (this.miLiveGdb) {
+                    const config = args.config;
+                    this.miLiveGdb.setPerformanceOptimizationConfig(config);
+                    response.body = { success: true };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveGetPerformanceStats':
+                if (this.miLiveGdb) {
+                    const stats = this.miLiveGdb.getPerformanceStats();
+                    response.body = { stats };
+                } else {
+                    response.body = { stats: null };
+                }
+                this.sendResponse(response);
+                break;
+
+            case 'liveOptimizeMemory':
+                if (this.miLiveGdb) {
+                    this.miLiveGdb.optimizeMemoryUsage();
+                    response.body = { success: true };
+                } else {
+                    response.body = { success: false, error: 'Live watch not enabled' };
+                }
+                this.sendResponse(response);
+                break;
+
             case 'is-global-or-static': {
                 const varRef = args.varRef;
                 const id = this.variableHandles.get(varRef);

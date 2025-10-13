@@ -6,7 +6,7 @@ import { CortexDebugChannel } from '../dbgmsgs';
 import { LiveWatchTreeProvider, LiveVariableNode } from './views/live-watch';
 import { EditableLiveWatchPanel } from './views/editable-live-watch';
 import { WaveformDataProvider } from './views/waveform-data-provider';
-import { WaveformWebviewPanel } from './views/waveform-webview';
+import { WaveformWebViewManager, IWaveformDataProvider } from './views/waveform';
 import { StructureMemberTreeDataProvider } from './views/structure-member-tree';
 import { CmBacktraceAnalyzer } from './cmbacktrace';
 import { FaultAnalysisTreeProvider } from './views/fault-analysis-tree';
@@ -52,7 +52,7 @@ export class CortexDebugExtension {
     private liveWatchProvider: LiveWatchTreeProvider;
     private liveWatchTreeView: vscode.TreeView<LiveVariableNode>;
     private waveformDataProvider: WaveformDataProvider;
-    private waveformWebview: WaveformWebviewPanel;
+    private waveformWebview: WaveformWebViewManager;
     private cmBacktraceAnalyzer: CmBacktraceAnalyzer;
     private faultAnalysisProvider: FaultAnalysisTreeProvider;
     private faultAnalysisTreeView: vscode.TreeView<any>;
@@ -78,7 +78,11 @@ export class CortexDebugExtension {
         vscode.window.registerTreeDataProvider('cortex-debug.liveWatch', this.liveWatchProvider);
 
         this.waveformDataProvider = new WaveformDataProvider(this.liveWatchProvider);
-        this.waveformWebview = new WaveformWebviewPanel(this.context, this.liveWatchProvider, this.waveformDataProvider);
+        // Set up Live Watch integration
+        (this.waveformDataProvider as any).setLiveWatchProvider(this.liveWatchProvider);
+        (this.waveformDataProvider as any).useLiveWatchData(true); // Enable Live Watch data by default
+        // Use type assertion since old WaveformDataProvider has compatible methods
+        this.waveformWebview = new WaveformWebViewManager(this.context, this.waveformDataProvider as any);
 
         this.cmBacktraceAnalyzer = new CmBacktraceAnalyzer();
         this.faultAnalysisProvider = new FaultAnalysisTreeProvider(this.context);
@@ -107,6 +111,7 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.removeExpr', this.removeLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.editExpr', this.editLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToLiveWatch', this.addToLiveWatch.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.exportData', this.exportLiveWatchData.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveUp', this.moveUpLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.moveDown', this.moveDownLiveWatchExpr.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.setValue', this.setLiveWatchValue.bind(this)),
@@ -115,6 +120,7 @@ export class CortexDebugExtension {
             vscode.commands.registerCommand('cortex-debug.liveWatch.expand', this.expandLiveWatchItem.bind(this)),
 
             vscode.commands.registerCommand('cortex-debug.liveWatch.addToWaveform', this.addToWaveform.bind(this)),
+            vscode.commands.registerCommand('cortex-debug.liveWatch.syncWithWaveform', this.syncWithWaveform.bind(this)),
             vscode.commands.registerCommand('cortex-debug.liveWatch.selectStructMembers', this.selectStructMembers.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.configureStructMembers', this.configureStructMembers.bind(this)),
             vscode.commands.registerCommand('cortex-debug.waveform.selectStructMembers', this.configureWaveformStructMembers.bind(this)),
@@ -2473,6 +2479,90 @@ ${fftResult.peaks.slice(0, 3).map((peak, i) =>
                     this.faultAnalysisTreeView.reveal(null, { select: false, focus: true });
                 }
             });
+        }
+    }
+
+    /**
+     * Export Live Watch data
+     */
+    private async exportLiveWatchData() {
+        const session = vscode.debug.activeDebugSession;
+        if (!session) {
+            vscode.window.showErrorMessage('No active debug session');
+            return;
+        }
+
+        try {
+            // Show format selection
+            const format = await vscode.window.showQuickPick(['JSON', 'CSV'], {
+                placeHolder: 'Select export format'
+            });
+            if (!format) return;
+
+            // Show variable selection
+            const varOption = await vscode.window.showQuickPick(['All Variables', 'Specific Variable'], {
+                placeHolder: 'Select variables to export'
+            });
+            if (!varOption) return;
+
+            let varName: string | undefined;
+            if (varOption === 'Specific Variable') {
+                const input = await vscode.window.showInputBox({
+                    prompt: 'Enter variable name to export',
+                    placeHolder: 'e.g., myVariable'
+                });
+                if (!input) return;
+                varName = input.trim();
+            }
+
+            // Show max samples option
+            const maxSamplesInput = await vscode.window.showInputBox({
+                prompt: 'Maximum number of samples to export (leave empty for all)',
+                placeHolder: 'e.g., 1000'
+            });
+            const maxSamples = maxSamplesInput ? parseInt(maxSamplesInput) : undefined;
+
+            // Export data
+            const result = await session.customRequest('liveExportData', {
+                format: format.toLowerCase(),
+                varName: varName,
+                maxSamples: maxSamples
+            });
+
+            if (result.success) {
+                // Save to file
+                const fileName = `livewatch_export_${new Date().toISOString().replace(/[:.]/g, '-')}.${format.toLowerCase()}`;
+                const uri = await vscode.window.showSaveDialog({
+                    defaultUri: vscode.Uri.file(fileName),
+                    filters: {
+                        [format]: [format.toLowerCase()]
+                    }
+                });
+
+                if (uri) {
+                    const encoder = new TextEncoder();
+                    const data = encoder.encode(result.data);
+                    await vscode.workspace.fs.writeFile(uri, data);
+                    vscode.window.showInformationMessage(`Data exported successfully to ${uri.fsPath}`);
+                }
+            } else {
+                vscode.window.showErrorMessage(`Export failed: ${result.error}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Export error: ${error}`);
+        }
+    }
+
+    private syncWithWaveform(): void {
+        try {
+            if (this.waveformDataProvider) {
+                (this.waveformDataProvider as any).syncWithLiveWatch();
+                vscode.window.showInformationMessage('Waveform synchronized with Live Watch variables');
+            } else {
+                vscode.window.showWarningMessage('Waveform not available');
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Sync error: ${error}`);
         }
     }
 }

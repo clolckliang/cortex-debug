@@ -44,6 +44,17 @@ export class LiveVariableNode extends BaseNode {
         if (!this.parent && !this.session) {
             ret.push(new LiveVariableNodeMsg(this, false));
         }
+
+        // Add statistics node if we have an active session
+        if (!this.parent && this.session && LiveWatchTreeProvider.session) {
+            ret.push(new LiveVariableNodeStats(this));
+        }
+
+        // Add error status node
+        if (!this.parent) {
+            ret.push(new LiveVariableNodeErrorStatus(this));
+        }
+
         return ret;
     }
 
@@ -689,6 +700,183 @@ class LiveVariableNodeMsg extends LiveVariableNode {
     }
 }
 
+class LiveVariableNodeStats extends LiveVariableNode {
+    constructor(parent: LiveVariableNode) {
+        super(parent, 'stats', 'stats');
+    }
+
+    public getTreeItem(): TreeItem | Promise<TreeItem> {
+        const state = TreeItemCollapsibleState.Collapsed;
+        const label: vscode.TreeItemLabel = {
+            label: '📊 Sampling Statistics'
+        };
+        const item = new TreeItem(label, state);
+        item.contextValue = 'liveWatchStats';
+        item.tooltip = 'Click to view detailed sampling statistics';
+        return item;
+    }
+
+    public getChildren(): LiveVariableNode[] {
+        return [
+            new LiveVariableNodeStatItem(this, 'Total Samples', 'totalSamples'),
+            new LiveVariableNodeStatItem(this, 'Average Interval', 'averageInterval'),
+            new LiveVariableNodeStatItem(this, 'Variables Count', 'variablesCount'),
+            new LiveVariableNodeStatItem(this, 'Sampling Errors', 'samplingErrors'),
+            new LiveVariableNodeStatItem(this, 'Last Sample Time', 'lastSampleTime')
+        ];
+    }
+
+    public getName(): string {
+        return 'Sampling Statistics';
+    }
+}
+
+class LiveVariableNodeStatItem extends LiveVariableNode {
+    constructor(parent: LiveVariableNode, private statName: string, private statKey: string) {
+        super(parent, statName, statName);
+    }
+
+    public getTreeItem(): TreeItem | Promise<TreeItem> {
+        const state = TreeItemCollapsibleState.None;
+        const label: vscode.TreeItemLabel = {
+            label: `${this.statName}: ${this.getStatValue()}`
+        };
+        const item = new TreeItem(label, state);
+        item.contextValue = 'liveWatchStatItem';
+        return item;
+    }
+
+    private getStatValue(): string {
+        if (!LiveWatchTreeProvider.session) {
+            return 'N/A';
+        }
+
+        // Get stats from the provider
+        const provider = (this.parent as any)['provider'] as LiveWatchTreeProvider;
+        const stats = provider?.getSamplingStats();
+
+        if (!stats) {
+            return 'N/A';
+        }
+
+        switch (this.statKey) {
+            case 'totalSamples':
+                return (stats.totalSamples as number)?.toString() || '0';
+            case 'averageInterval':
+                return stats.averageIntervalMs ? `${(stats.averageIntervalMs as number).toFixed(1)}ms` : '0ms';
+            case 'variablesCount':
+                return (stats.variablesCount as number)?.toString() || '0';
+            case 'samplingErrors':
+                return (stats.samplingErrors as number)?.toString() || '0';
+            case 'lastSampleTime':
+                if (stats.lastSampleTime && stats.lastSampleTime > 0) {
+                    const now = Date.now();
+                    const diff = now - stats.lastSampleTime;
+                    if (diff < 1000) {
+                        return `${diff}ms ago`;
+                    } else if (diff < 60000) {
+                        return `${Math.floor(diff / 1000)}s ago`;
+                    } else {
+                        return `${Math.floor(diff / 60000)}m ago`;
+                    }
+                }
+                return 'Never';
+            default:
+                return 'N/A';
+        }
+    }
+
+    public getChildren(): LiveVariableNode[] {
+        return [];
+    }
+
+    public getName(): string {
+        return this.statName;
+    }
+}
+
+class LiveVariableNodeErrorStatus extends LiveVariableNode {
+    constructor(parent: LiveVariableNode) {
+        super(parent, 'errorStatus', 'errorStatus');
+    }
+
+    public getTreeItem(): TreeItem | Promise<TreeItem> {
+        const state = TreeItemCollapsibleState.Collapsed;
+        const provider = (this.parent as any)['provider'] as LiveWatchTreeProvider;
+        const connectionStatus = provider?.getConnectionStatus() || 'disconnected';
+        const statusMessage = provider?.getStatusMessage() || 'Disconnected';
+
+        let icon = '🔴';
+        let label = 'Status: Disconnected';
+
+        switch (connectionStatus) {
+            case 'connected':
+                icon = '🟢';
+                label = 'Status: Connected';
+                break;
+            case 'error':
+                icon = '⚠️';
+                label = `Status: Error - ${statusMessage}`;
+                break;
+            case 'disconnected':
+            default:
+                icon = '🔴';
+                label = 'Status: Disconnected';
+                break;
+        }
+
+        const treeItemLabel: vscode.TreeItemLabel = {
+            label: `${icon} ${label}`
+        };
+        const item = new TreeItem(treeItemLabel, state);
+        item.contextValue = 'liveWatchErrorStatus';
+        item.tooltip = `Connection Status: ${statusMessage}`;
+        return item;
+    }
+
+    public getChildren(): LiveVariableNode[] {
+        const provider = (this.parent as any)['provider'] as LiveWatchTreeProvider;
+        const errorInfo = provider?.getErrorInfo();
+
+        const children: LiveVariableNode[] = [];
+
+        if (errorInfo && errorInfo.error) {
+            children.push(new LiveVariableNodeErrorItem(this, 'Last Error', errorInfo.error));
+            children.push(new LiveVariableNodeErrorItem(this, 'Error Count', errorInfo.count.toString()));
+            children.push(new LiveVariableNodeErrorItem(this, 'Last Error Time', new Date(errorInfo.time).toLocaleString()));
+        }
+
+        children.push(new LiveVariableNodeErrorItem(this, 'Connection Status', provider?.getConnectionStatus() || 'disconnected'));
+        children.push(new LiveVariableNodeErrorItem(this, 'Status Message', provider?.getStatusMessage() || 'No status'));
+
+        return children;
+    }
+
+    public getName(): string {
+        return 'Error Status';
+    }
+}
+
+class LiveVariableNodeErrorItem extends LiveVariableNode {
+    constructor(parent: LiveVariableNode, private itemName: string, private itemValue: string) {
+        super(parent, itemName, itemName);
+    }
+
+    public getTreeItem(): TreeItem | Promise<TreeItem> {
+        const state = TreeItemCollapsibleState.None;
+        const label: vscode.TreeItemLabel = {
+            label: `${this.itemName}: ${this.itemValue}`
+        };
+        const item = new TreeItem(label, state);
+        item.contextValue = 'liveWatchErrorItem';
+        return item;
+    }
+
+    public getName(): string {
+        return this.itemName;
+    }
+}
+
 interface NodeState {
     name: string;
     expr: string;
@@ -711,6 +899,14 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
     private timeout: NodeJS.Timeout | undefined;
     private timeoutMs: number = 250;
     private isStopped = true;
+    private samplingStats: any = null; // Store sampling statistics
+
+    // Error handling and status management
+    private lastError: string | null = null;
+    private errorCount: number = 0;
+    private lastErrorTime: number = 0;
+    private connectionStatus: 'connected' | 'disconnected' | 'error' = 'disconnected';
+    private statusMessage: string = '';
 
     protected oldState = new Map <string, vscode.TreeItemCollapsibleState>();
     constructor(private context: vscode.ExtensionContext) {
@@ -782,20 +978,44 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
                 restart(0);
             } else {
                 const start = Date.now();
-                // The following will update all the variables in the backend cache in bulk
-                session.customRequest('liveCacheRefresh', {
-                    deleteAll: false       // Delete gdb-vars?
-                }).then(() => {
-                    this.variables.refresh(session).finally(() => {
-                        const elapsed = Date.now() - start;
-                        // console.log(`Refreshed in ${elapsed} ms`);
-                        this.fire();
-                        if (elapsed > this.timeoutMs) {
-                            console.error('??????? over flow ????');
-                        }
-                        restart(elapsed);
+                try {
+                    // The following will update all the variables in the backend cache in bulk
+                    const refreshPromise = session.customRequest('liveCacheRefresh', {
+                        deleteAll: false       // Delete gdb-vars?
                     });
-                });
+
+                    if (refreshPromise && typeof refreshPromise.then === 'function') {
+                        refreshPromise.then(() => {
+                            this.variables.refresh(session).finally(() => {
+                                const elapsed = Date.now() - start;
+                                // console.log(`Refreshed in ${elapsed} ms`);
+
+                                // Update sampling statistics
+                                this.updateSamplingStats().then(() => {
+                                    this.fire();
+                                });
+
+                                if (elapsed > this.timeoutMs) {
+                                    console.error('??????? over flow ????');
+                                }
+                                restart(elapsed);
+                            });
+                        }, (error) => {
+                            // Handle refresh errors
+                            this.setError(`Refresh failed: ${error.message || error}`);
+                            console.error('[LiveWatch] Refresh error:', error);
+                            restart(0);
+                        });
+                    } else {
+                        // Fallback if customRequest doesn't return a proper Promise
+                        restart(0);
+                    }
+                } catch (error) {
+                    // Handle synchronous errors
+                    this.setError(`Refresh failed: ${error.message || error}`);
+                    console.error('[LiveWatch] Refresh error:', error);
+                    restart(0);
+                }
             }
         } else {
             this.fire();
@@ -861,6 +1081,10 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
             LiveWatchTreeProvider.session = undefined;
             this.fire();
             this.saveState();
+
+            // Set disconnected status
+            this.setConnectionStatus('disconnected', 'Live Watch session terminated');
+
             setTimeout(() => {
                 // We hold the current values as they are until we start another debug session and
                 // another fire() is called
@@ -893,6 +1117,9 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
         const samplesPerSecond = Math.max(1, Math.min(20, liveWatch.samplesPerSecond ?? 4));
         this.timeoutMs = 1000 / samplesPerSecond;
         this.startTimer();
+
+        // Set connection status
+        this.setConnectionStatus('connected', 'Live Watch session started');
     }
 
     public debugStopped(session: vscode.DebugSession) {
@@ -1012,6 +1239,93 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
             this.pendingFires++;
         }
     }
+
+    /**
+     * Update sampling statistics from the debug session
+     */
+    public async updateSamplingStats(): Promise<void> {
+        if (!LiveWatchTreeProvider.session) {
+            this.samplingStats = null;
+            return;
+        }
+
+        try {
+            const result = await LiveWatchTreeProvider.session.customRequest('liveGetSamplingStats', {});
+            if (result && result.stats) {
+                this.samplingStats = result.stats;
+                // Clear any previous errors if stats are successfully retrieved
+                this.clearError();
+            }
+        } catch (error) {
+            console.error('Failed to get sampling stats:', error);
+            this.samplingStats = null;
+            this.setError(`Failed to get sampling stats: ${error.message || error}`);
+        }
+    }
+
+    /**
+     * Get current sampling statistics
+     */
+    public getSamplingStats(): any {
+        return this.samplingStats;
+    }
+
+    // Error handling and status management methods
+    public setError(error: string): void {
+        this.lastError = error;
+        this.errorCount++;
+        this.lastErrorTime = Date.now();
+        this.connectionStatus = 'error';
+        this.statusMessage = `Error: ${error}`;
+
+        // Show error notification
+        vscode.window.showErrorMessage(`Live Watch Error: ${error}`);
+
+        // Fire event to update UI
+        this.fire();
+    }
+
+    public clearError(): void {
+        this.lastError = null;
+        this.connectionStatus = 'connected';
+        this.statusMessage = 'Connected';
+        this.fire();
+    }
+
+    public setConnectionStatus(status: 'connected' | 'disconnected' | 'error', message?: string): void {
+        this.connectionStatus = status;
+        this.statusMessage = message || status;
+        this.fire();
+    }
+
+    public getLastError(): string | null {
+        return this.lastError;
+    }
+
+    public getErrorCount(): number {
+        return this.errorCount;
+    }
+
+    public getConnectionStatus(): string {
+        return this.connectionStatus;
+    }
+
+    public getStatusMessage(): string {
+        return this.statusMessage;
+    }
+
+    public getErrorInfo(): { error: string | null; count: number; time: number } {
+        return {
+            error: this.lastError,
+            count: this.errorCount,
+            time: this.lastErrorTime
+        };
+    }
+
+    public resetErrorCount(): void {
+        this.errorCount = 0;
+        this.fire();
+    }
 }
 
 /*
@@ -1062,4 +1376,4 @@ export class LiveWatchTreeProvider implements TreeDataProvider<LiveVariableNode>
         }
         return undefined;
     }
-    */
+*/

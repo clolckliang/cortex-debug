@@ -245,6 +245,42 @@ export interface LiveWatchConfig {
         enabled?: boolean;      // Enable high-speed background sampling
         intervalMs?: number;    // Sampling interval in milliseconds (1-100ms, default 10ms)
     };
+    // Historical data buffering configuration
+    historicalData?: {
+        enabled?: boolean;      // Enable historical data buffering
+        maxSamples?: number;    // Maximum samples per variable (default 1000)
+        enableChangeRate?: boolean; // Calculate change rate between samples
+    };
+    // Conditional sampling configuration
+    conditionalSampling?: {
+        enabled?: boolean;      // Enable conditional sampling
+        triggers?: Array<{
+            variable: string;   // Variable name to monitor
+            condition: 'change' | 'equals' | 'greater' | 'less' | 'range'; // Trigger condition
+            value?: any;       // Value for comparison (for equals, greater, less)
+            minValue?: any;    // Minimum value for range condition
+            maxValue?: any;    // Maximum value for range condition
+            debounceMs?: number; // Debounce time in milliseconds (default 100ms)
+        }>;
+        action?: 'sample' | 'pause' | 'resume'; // Action to take when triggered
+    };
+    // Adaptive sampling configuration
+    adaptiveSampling?: {
+        enabled?: boolean;         // Enable adaptive sampling
+        minIntervalMs?: number;    // Minimum sampling interval in milliseconds (default 1ms)
+        maxIntervalMs?: number;    // Maximum sampling interval in milliseconds (default 1000ms)
+        changeThreshold?: number;  // Change rate threshold for adjustment (default 0.1)
+        stabilityPeriodMs?: number; // Period to wait before adjusting interval (default 5000ms)
+        adjustmentFactor?: number; // Factor for interval adjustment (default 0.5)
+    };
+    performanceOptimization?: {
+        enabled?: boolean;         // Enable performance optimization
+        batchSize?: number;        // Batch size for requests (default 10)
+        memoryLimitMB?: number;    // Memory limit in MB (default 100)
+        compressionEnabled?: boolean; // Enable data compression (default true)
+        cacheTimeoutMs?: number;   // Cache timeout in milliseconds (default 5000)
+        maxConcurrentRequests?: number; // Maximum concurrent requests (default 5)
+    };
 }
 
 // Helper function to create a symbolFile object properly with required elements

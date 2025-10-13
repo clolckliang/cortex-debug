@@ -45,16 +45,7 @@ const extensionConfig = {
             }
         ]
     },
-    plugins: [
-        new CopyWebpackPlugin({
-            patterns: [
-                {
-                    from: 'src/frontend/views/waveform-client.js',
-                    to: 'waveform-client.js'
-                }
-            ]
-        })
-    ]
+    plugins: []
 };
 
 const adapterConfig = {
@@ -161,4 +152,39 @@ const docgenConfig = {
     ]
 };
 
-module.exports = [extensionConfig, adapterConfig, grapherConfig, docgenConfig];
+// Waveform client config
+const waveformClientConfig = {
+    target: 'web',
+    entry: './src/frontend/views/waveform/waveform-client.ts',
+    output: {
+        path: path.resolve(__dirname, 'dist'),
+        filename: 'waveform-client.js',
+        devtoolModuleFilenameTemplate: '../[resource-path]'
+    },
+    devtool: 'source-map',
+    resolve: {
+        extensions: ['.ts', '.js']
+    },
+    module: {
+        rules: [
+            {
+                test: /\.ts$/,
+                exclude: /node_modules/,
+                use: [
+                    {
+                        loader: 'ts-loader',
+                        options: {
+                            compilerOptions: {
+                                module: 'esnext',
+                                target: 'es2015',
+                                lib: ['es2015', 'dom']
+                            }
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+};
+
+module.exports = [extensionConfig, adapterConfig, grapherConfig, docgenConfig, waveformClientConfig];
